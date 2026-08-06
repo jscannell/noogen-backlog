@@ -124,8 +124,15 @@ namespace Noogen.Backlog.Cli
             }
         }
 
+        /// <summary>
+        /// Passes this assembly so the client baked in at build time is found. Without it the
+        /// tool would fall back to requiring a file on every user's machine.
+        /// </summary>
+        internal static OAuthClientSettings ResolveOAuthClient() =>
+            OAuthClientSettings.Resolve(LocalConfig.OAuthClientPath, typeof(Program).Assembly);
+
         internal static UserCredentialStore CreateCredentialStore() =>
-            new(OAuthClientSettings.Resolve(LocalConfig.OAuthClientPath), LocalConfig.TokenDirectory);
+            new(ResolveOAuthClient(), LocalConfig.TokenDirectory);
 
         internal static async Task<ResolvedCredential> ResolveCredentialAsync(LocalConfig config, string? account = null)
         {

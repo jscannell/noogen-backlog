@@ -86,7 +86,12 @@ These are the things to be careful about; most of the design follows from them.
     Be honest in messaging about the limit: this defeats file harvesting and offline reuse, not
     malware already running as the user.
 
-14. **Credential precedence is `NOOGEN_BACKLOG_CREDENTIALS` → signed-in user → ADC**, and ADC is
+14. **The OAuth client is embedded at build time** from a gitignored `oauth.json` at the repo root
+    (`BacklogOAuthClientFile` to override). Resolution is environment → local file → embedded, so
+    an override beats the baked-in default. A build without the file must keep working — that is
+    what a contributor without the secret gets — so never make the embedding required.
+
+15. **Credential precedence is `NOOGEN_BACKLOG_CREDENTIALS` → signed-in user → ADC**, and ADC is
     never volunteered on a workstation, where it is machine-global and usually belongs to
     something else. `GoogleCredentialResolver.Choose` isolates the decision so it stays testable.
     Credentials resolve once at startup — never lazily from inside a request, because resolution

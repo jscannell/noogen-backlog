@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Google.Apis.Auth.OAuth2;
@@ -21,16 +22,22 @@ namespace Noogen.Providers.GoogleWorkspace
         public const string ClientIdEnvironmentVariable = "NOOGEN_BACKLOG_OAUTH_CLIENT_ID";
         public const string ClientSecretEnvironmentVariable = "NOOGEN_BACKLOG_OAUTH_CLIENT_SECRET";
 
-        /// <summary>Set at build time for an internal distribution; empty in source.</summary>
-        public const string CompiledInClientId = "";
-
-        public const string CompiledInClientSecret = "";
+        /// <summary>
+        /// Name of the resource the build bakes into the tool, so a distributed install works
+        /// with nothing on disk. See the CLI csproj: it embeds a gitignored oauth.json when one
+        /// is present, which keeps the value out of the repository and off every user's machine.
+        /// </summary>
+        public const string EmbeddedResourceName = "oauth.json";
 
         [JsonPropertyName("clientId")]
         public string? ClientId { get; set; }
 
         [JsonPropertyName("clientSecret")]
         public string? ClientSecret { get; set; }
+
+        /// <summary>Where this came from, so `backlog whoami` can show it without guesswork.</summary>
+        [JsonIgnore]
+        public string Source { get; set; } = "none";
 
         public bool IsConfigured => !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
 
@@ -40,12 +47,20 @@ namespace Noogen.Providers.GoogleWorkspace
             ClientSecret = ClientSecret
         };
 
-        public static OAuthClientSettings Resolve(string? filePath = null)
+        /// <summary>
+        /// Environment, then an on-disk file, then whatever the build embedded.
+        ///
+        /// The embedded copy is the org default and is why an ordinary install needs no setup at
+        /// all. It comes last so that anyone testing against a different client can override it
+        /// without rebuilding — an override should beat a default, not the other way round.
+        /// </summary>
+        public static OAuthClientSettings Resolve(string? filePath = null, Assembly? embeddedIn = null)
         {
             var fromEnvironment = new OAuthClientSettings
             {
                 ClientId = Environment.GetEnvironmentVariable(ClientIdEnvironmentVariable),
-                ClientSecret = Environment.GetEnvironmentVariable(ClientSecretEnvironmentVariable)
+                ClientSecret = Environment.GetEnvironmentVariable(ClientSecretEnvironmentVariable),
+                Source = $"{ClientIdEnvironmentVariable} environment variable"
             };
 
             if (fromEnvironment.IsConfigured)
@@ -55,27 +70,56 @@ namespace Noogen.Providers.GoogleWorkspace
             {
                 var fromFile = ReadFile(filePath);
                 if (fromFile is not null && fromFile.IsConfigured)
+                {
+                    fromFile.Source = filePath;
                     return fromFile;
+                }
             }
 
-            return new OAuthClientSettings
-            {
-                ClientId = CompiledInClientId,
-                ClientSecret = CompiledInClientSecret
-            };
+            var fromEmbedded = ReadEmbedded(embeddedIn);
+            if (fromEmbedded is not null && fromEmbedded.IsConfigured)
+                return fromEmbedded;
+
+            return new OAuthClientSettings();
         }
 
-        static OAuthClientSettings? ReadFile(string filePath)
+        static OAuthClientSettings? ReadEmbedded(Assembly? assembly)
+        {
+            if (assembly is null)
+                return null;
+
+            var name = assembly.GetManifestResourceNames()
+                .FirstOrDefault(candidate => candidate.EndsWith(EmbeddedResourceName, StringComparison.OrdinalIgnoreCase));
+
+            if (name is null)
+                return null;
+
+            using var stream = assembly.GetManifestResourceStream(name);
+            if (stream is null)
+                return null;
+
+            using var reader = new StreamReader(stream);
+            var settings = Parse(reader.ReadToEnd(), $"embedded resource '{name}'");
+
+            if (settings is not null)
+                settings.Source = "built into this tool";
+
+            return settings;
+        }
+
+        static OAuthClientSettings? ReadFile(string filePath) => Parse(File.ReadAllText(filePath), filePath);
+
+        static OAuthClientSettings? Parse(string json, string origin)
         {
             JsonDocument document;
 
             try
             {
-                document = JsonDocument.Parse(File.ReadAllText(filePath));
+                document = JsonDocument.Parse(json);
             }
             catch (JsonException exception)
             {
-                throw new OAuthClientInvalidException(filePath, $"the file is not valid JSON ({exception.Message})");
+                throw new OAuthClientInvalidException(origin, $"the content is not valid JSON ({exception.Message})");
             }
 
             using (document)
@@ -86,7 +130,7 @@ namespace Noogen.Providers.GoogleWorkspace
                 if (document.RootElement.TryGetProperty("web", out _))
                 {
                     throw new OAuthClientInvalidException(
-                        filePath,
+                        origin,
                         "this is a Web application client. Create a new OAuth client ID with " +
                         "Application type: Desktop app, and download that one instead");
                 }
@@ -101,7 +145,7 @@ namespace Noogen.Providers.GoogleWorkspace
                     };
 
                     if (!settings.IsConfigured)
-                        throw new OAuthClientInvalidException(filePath, "the 'installed' section has no client_id or client_secret");
+                        throw new OAuthClientInvalidException(origin, "the 'installed' section has no client_id or client_secret");
 
                     return settings;
                 }
@@ -117,7 +161,7 @@ namespace Noogen.Providers.GoogleWorkspace
                 if (!flat.IsConfigured)
                 {
                     throw new OAuthClientInvalidException(
-                        filePath,
+                        origin,
                         "expected either the client_secret JSON downloaded from the Cloud console " +
                         "(with an 'installed' section) or {\"clientId\": \"...\", \"clientSecret\": \"...\"}");
                 }

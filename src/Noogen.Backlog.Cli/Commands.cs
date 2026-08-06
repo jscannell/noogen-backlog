@@ -40,7 +40,7 @@ namespace Noogen.Backlog.Cli
             var account = _config.ResolveAccount(command.Option("account"));
 
             // Fail before promising a browser we cannot open.
-            if (!OAuthClientSettings.Resolve(LocalConfig.OAuthClientPath).IsConfigured)
+            if (!Program.ResolveOAuthClient().IsConfigured)
                 throw new OAuthClientNotConfiguredException(LocalConfig.OAuthClientPath);
 
             Output.WriteError("Opening your browser to sign in with Google...");
@@ -109,6 +109,7 @@ namespace Noogen.Backlog.Cli
         {
             var store = Program.CreateCredentialStore();
             var account = _config.ResolveAccount(null);
+            var client = Program.ResolveOAuthClient();
 
             // whoami must answer even when the answer is "nothing is set up" — that is exactly
             // when someone runs it.
@@ -132,6 +133,8 @@ namespace Noogen.Backlog.Cli
                     ["source"] = resolved?.Source.ToString() ?? "None",
                     ["description"] = resolved?.Description,
                     ["problem"] = problem,
+                    ["oauthClientId"] = client.ClientId,
+                    ["oauthClientSource"] = client.Source,
                     ["tokenProtection"] = store.Protector.Description,
                     ["osBacked"] = store.Protector.IsOsBacked,
                     ["accounts"] = store.ListAccounts()
@@ -141,6 +144,8 @@ namespace Noogen.Backlog.Cli
 
             Output.WriteLine($"account        {account}");
             Output.WriteLine($"authenticated  {resolved?.Description ?? "not authenticated"}");
+            Output.WriteLine($"oauth client   {(client.IsConfigured ? client.ClientId : "not configured")}");
+            Output.WriteLine($"  from         {client.Source}");
             Output.WriteLine($"token store    {store.TokenDirectory}");
             Output.WriteLine($"protected by   {store.Protector.Description}");
 

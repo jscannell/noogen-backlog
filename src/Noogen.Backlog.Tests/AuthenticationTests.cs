@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Noogen.Backlog.Cli;
 using Noogen.Providers.GoogleWorkspace;
 using Noogen.Providers.GoogleWorkspace.Security;
 
@@ -137,6 +138,53 @@ namespace Noogen.Backlog.Tests
             File.WriteAllText(path, """{ "installed": { "client_id": "1234.apps.googleusercontent.com" } }""");
 
             Assert.Contains("client_secret", Assert.Throws<OAuthClientInvalidException>(() => OAuthClientSettings.Resolve(path)).Message);
+        }
+
+        [Fact]
+        public void An_embedded_client_is_found_without_any_file()
+        {
+            // Whether the CLI assembly carries one depends on whether the build had the gitignored
+            // oauth.json, so assert the behaviour for whichever case this build is — both are
+            // legitimate, and a contributor without the secret must still get a working build.
+            var cli = typeof(Program).Assembly;
+            var hasEmbedded = cli.GetManifestResourceNames()
+                .Any(name => name.EndsWith(OAuthClientSettings.EmbeddedResourceName, StringComparison.OrdinalIgnoreCase));
+
+            var settings = OAuthClientSettings.Resolve(Path.Combine(_directory, "absent.json"), cli);
+
+            if (hasEmbedded)
+            {
+                Assert.True(settings.IsConfigured);
+                Assert.Equal("built into this tool", settings.Source);
+            }
+            else
+            {
+                Assert.False(settings.IsConfigured);
+            }
+        }
+
+        [Fact]
+        public void A_local_file_overrides_the_embedded_default()
+        {
+            // An override should beat a default, so someone can point at a different client
+            // without rebuilding the tool.
+            var path = Path.Combine(_directory, "oauth.json");
+            File.WriteAllText(path, """{ "clientId": "override", "clientSecret": "override-secret" }""");
+
+            var settings = OAuthClientSettings.Resolve(path, typeof(Program).Assembly);
+
+            Assert.Equal("override", settings.ClientId);
+            Assert.Equal(path, settings.Source);
+        }
+
+        [Fact]
+        public void An_assembly_with_no_embedded_client_resolves_to_nothing()
+        {
+            // The test assembly carries no oauth.json.
+            var settings = OAuthClientSettings.Resolve(Path.Combine(_directory, "absent.json"), typeof(OAuthClientSettingsTests).Assembly);
+
+            Assert.False(settings.IsConfigured);
+            Assert.Equal("none", settings.Source);
         }
 
         [Fact]

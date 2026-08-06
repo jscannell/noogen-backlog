@@ -14,6 +14,31 @@
     <Description>Noogen backlog — a WSJF-prioritised Kanban work-item tracker stored in Google Drive.</Description>
   </PropertyGroup>
 
+  <!--
+    Bakes the organisation's OAuth client into the tool so an ordinary install needs nothing on
+    disk. The source file is gitignored and never committed: the value reaches a build machine
+    either as a checked-out-but-ignored file or, in CI, by pointing BacklogOAuthClientFile at a
+    secret written to a temporary path.
+
+    Building without it is fine and supported — the tool then falls back to
+    %APPDATA%\Noogen\oauth.json or the NOOGEN_BACKLOG_OAUTH_* environment variables, which is what
+    a contributor without the secret gets.
+  -->
+  <PropertyGroup>
+    <BacklogOAuthClientFile Condition="'$(BacklogOAuthClientFile)' == ''">$(MSBuildThisFileDirectory)..\..\oauth.json</BacklogOAuthClientFile>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(BacklogOAuthClientFile)')">
+    <EmbeddedResource Include="$(BacklogOAuthClientFile)" LogicalName="oauth.json" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="ReportOAuthClientEmbedding" BeforeTargets="CoreCompile">
+    <Message Condition="Exists('$(BacklogOAuthClientFile)')" Importance="normal"
+             Text="Embedding OAuth client from $(BacklogOAuthClientFile)." />
+    <Message Condition="!Exists('$(BacklogOAuthClientFile)')" Importance="normal"
+             Text="No OAuth client at $(BacklogOAuthClientFile); the built tool will require oauth.json or NOOGEN_BACKLOG_OAUTH_* at runtime." />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\Noogen.Backlog\Noogen.Backlog.csproj" />
   </ItemGroup>

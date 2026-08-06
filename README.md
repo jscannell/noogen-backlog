@@ -155,7 +155,9 @@ Move the project into the org, or use one that already lives there.
      loopback redirect an installed app uses. (If you pick wrong, `backlog login` says so by name.)
 3. **Download JSON** and save it to `%APPDATA%\Noogen\oauth.json` — unedited, exactly as Google
    gives it to you. On macOS and Linux that path is `~/.config/Noogen/oauth.json`.
-4. Use the **same GCP project** that has the Drive API and Sheets API enabled.
+4. Use the **same GCP project** that has the Drive API and Sheets API enabled. The client in use
+   today lives in project **`backlog-504721`**, so those two APIs must be enabled there — not in
+   whichever project the rest of the platform uses.
 
 **Where Workspace admin does come in.** If your org restricts third-party app access
 (Admin console → Security → Access and data control → **API controls → App access control**), an
@@ -186,17 +188,38 @@ hand-written alternative also works:
 { "clientId": "123...apps.googleusercontent.com", "clientSecret": "GOCSPX-..." }
 ```
 
-**Distributing it to the team.** Three options, in order of preference:
+**Distributing it to the team — it is built into the tool.** Put `oauth.json` at the repository
+root and the build embeds it, so an ordinary install needs nothing on disk and nobody but the
+person who packs the tool ever handles the file:
 
-| how | good for |
-|---|---|
-| Share the file via 1Password / internal vault; each person saves it to the path above | most teams |
-| Set `NOOGEN_BACKLOG_OAUTH_CLIENT_ID` and `NOOGEN_BACKLOG_OAUTH_CLIENT_SECRET` from a login script or MDM | managed fleets; env wins over the file |
-| Bake into an internal build via `OAuthClientSettings.CompiledInClientId` | a private nupkg feed |
+```bash
+# once, on the machine that packs the tool
+cp ~/Downloads/client_secret_*.json oauth.json
+dotnet pack src/Noogen.Backlog.Cli/Noogen.Backlog.Cli.csproj -c Release
+```
 
-⚠️ **Don't commit it to a repo.** Not because it is dangerous — see below — but because GitHub's
-secret scanning detects the `GOCSPX-` prefix and will raise alerts every time. The `.gitignore`
-already excludes it.
+The build prints which it did — `Embedding OAuth client from …` or `No OAuth client at …`.
+`backlog whoami` then reports the client id and where it came from, so the result is verifiable
+rather than assumed.
+
+Building **without** the file is fully supported: the tool falls back to
+`%APPDATA%\Noogen\oauth.json` and then to `NOOGEN_BACKLOG_OAUTH_CLIENT_ID` /
+`NOOGEN_BACKLOG_OAUTH_CLIENT_SECRET`. That is what a contributor who does not have the secret
+gets, and the whole test suite passes in that state.
+
+Resolution order is environment → local file → embedded. The embedded copy is the organisation
+default, and it comes last so anyone testing against a different client can override it without
+rebuilding.
+
+In CI, write the secret to a temporary path and point the build at it:
+
+```bash
+dotnet pack ... -p:BacklogOAuthClientFile=$RUNNER_TEMP/oauth.json
+```
+
+⚠️ **`oauth.json` is gitignored and must stay that way.** Not because it is dangerous — see
+below — but because GitHub's secret scanning detects the `GOCSPX-` prefix and would alert, or
+block the push, every time.
 
 **Is the client secret actually secret?** No, and Google says so explicitly: for installed
 applications the client secret cannot be kept confidential, because it ships to every user's
