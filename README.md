@@ -42,6 +42,22 @@ The `title` cell in the Sheet links to the ticket document. It is a rich-text li
 `HYPERLINK()` formula, so the stored cell value stays the plain title and ordinary reads are
 unaffected.
 
+## Times
+
+Timestamps are stored as **real Sheets datetime cells** and the spreadsheet's timezone is set to
+the backlog's configured one, so the Sheet renders local times natively, sorts correctly across
+DST, and supports date filters. Set it with `backlog init --timezone America/New_York`; it lives
+on the Config tab and `backlog doctor` flags a mismatch between it and the spreadsheet's own
+setting, because the two disagreeing would shift every stored instant.
+
+The CLI renders human output in that timezone and `--utc` opts out. **`--json` is always UTC** —
+it is the machine contract, and a representation that moved with a config setting would be a trap.
+
+Two honest caveats. A datetime serial is a wall-clock value, so the repeated hour at DST fall-back
+is ambiguous on read-back; it resolves to the earlier instant, bounded at one hour, once a year,
+on metrics reported in days. And serials are quantised to whole seconds, since a fractional day in
+a double cannot represent most instants exactly.
+
 ## Install
 
 ```bash
@@ -61,8 +77,10 @@ any one of them.
 3. Add that service-account email as a **Content manager** on the shared drive. Shared drives
    accept a service account as a direct member, so no domain-wide delegation is involved.
 4. Point `GOOGLE_APPLICATION_CREDENTIALS` at its JSON key.
-5. `backlog init --drive <sharedDriveId>` — creates the folders, the index, the tabs, the
-   formulas, and the Config tab. It is idempotent, so re-running repairs a half-finished setup.
+5. `backlog init --drive <sharedDriveId> [--timezone America/New_York]` — creates the folders,
+   the index, the tabs, the formulas, and the Config tab, and stamps the timezone onto the
+   spreadsheet. It is idempotent, so re-running repairs a half-finished setup. The timezone
+   defaults to this machine's on first run.
 
 > If step 4 is blocked by the `constraints/iam.disableServiceAccountKeyCreation` org policy, use
 > your own credentials instead — no code change is needed, because auth resolves through the ADC
@@ -98,7 +116,7 @@ backlog block <id> --reason "..." | backlog unblock <id> | backlog review <id>
 backlog archive <id> --as done|cancelled|duplicate [--note "..."]
 backlog restore <id>
 
-backlog init --drive <sharedDriveId>
+backlog init --drive <sharedDriveId> [--timezone America/New_York]
 backlog doctor | backlog reindex
 ```
 

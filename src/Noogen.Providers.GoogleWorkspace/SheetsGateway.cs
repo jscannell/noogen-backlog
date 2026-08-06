@@ -18,7 +18,12 @@ namespace Noogen.Providers.GoogleWorkspace
         public async Task<IList<IList<object>>> GetValuesAsync(string spreadsheetId, string range, CancellationToken cancellationToken = default)
         {
             var request = Service.Spreadsheets.Values.Get(spreadsheetId, range);
-            request.ValueRenderOption = SpreadsheetsResource.ValuesResource.GetRequest.ValueRenderOptionEnum.FORMATTEDVALUE;
+
+            // UNFORMATTED_VALUE keeps numbers as numbers and dates as serials. FORMATTED_VALUE
+            // would hand back locale-rendered text, so a reader in a different locale would parse
+            // different values out of the same sheet.
+            request.ValueRenderOption = SpreadsheetsResource.ValuesResource.GetRequest.ValueRenderOptionEnum.UNFORMATTEDVALUE;
+            request.DateTimeRenderOption = SpreadsheetsResource.ValuesResource.GetRequest.DateTimeRenderOptionEnum.SERIALNUMBER;
 
             var response = await request.ExecuteAsync(cancellationToken);
             return response.Values ?? [];
@@ -178,7 +183,7 @@ namespace Noogen.Providers.GoogleWorkspace
             await BatchUpdateAsync(spreadsheetId, [request], cancellationToken);
         }
 
-        public async Task SetColumnTextFormatAsync(string spreadsheetId, string tabName, int columnIndex, CancellationToken cancellationToken = default)
+        public async Task SetColumnDateTimeFormatAsync(string spreadsheetId, string tabName, int columnIndex, string pattern, CancellationToken cancellationToken = default)
         {
             var tabId = await GetTabIdAsync(spreadsheetId, tabName, cancellationToken);
 
@@ -197,10 +202,33 @@ namespace Noogen.Providers.GoogleWorkspace
                     {
                         UserEnteredFormat = new CellFormat
                         {
-                            NumberFormat = new NumberFormat { Type = "TEXT" }
+                            NumberFormat = new NumberFormat { Type = "DATE_TIME", Pattern = pattern }
                         }
                     },
                     Fields = "userEnteredFormat.numberFormat"
+                }
+            };
+
+            await BatchUpdateAsync(spreadsheetId, [request], cancellationToken);
+        }
+
+        public async Task<string?> GetSpreadsheetTimeZoneAsync(string spreadsheetId, CancellationToken cancellationToken = default)
+        {
+            var request = Service.Spreadsheets.Get(spreadsheetId);
+            request.Fields = "properties.timeZone";
+
+            var spreadsheet = await request.ExecuteAsync(cancellationToken);
+            return spreadsheet.Properties?.TimeZone;
+        }
+
+        public async Task SetSpreadsheetTimeZoneAsync(string spreadsheetId, string timeZoneId, CancellationToken cancellationToken = default)
+        {
+            var request = new Request
+            {
+                UpdateSpreadsheetProperties = new UpdateSpreadsheetPropertiesRequest
+                {
+                    Properties = new SpreadsheetProperties { TimeZone = timeZoneId },
+                    Fields = "timeZone"
                 }
             };
 

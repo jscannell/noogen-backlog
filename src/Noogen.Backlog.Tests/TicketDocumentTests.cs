@@ -26,7 +26,7 @@ namespace Noogen.Backlog.Tests
         };
 
         [Fact]
-        public void Round_trips_every_field()
+        public void Round_trips_every_human_editable_field()
         {
             var original = Sample();
             var serialized = TicketDocument.Serialize(original, "## Description\n\nSomething.");
@@ -38,15 +38,53 @@ namespace Noogen.Backlog.Tests
             Assert.Equal(original.Type, parsed.Type);
             Assert.Equal(original.Area, parsed.Area);
             Assert.Equal(original.Owner, parsed.Owner);
-            Assert.Equal(original.Phase, parsed.Phase);
-            Assert.Equal(original.State, parsed.State);
-            Assert.Equal(original.BlockedReason, parsed.BlockedReason);
-            Assert.Equal(original.BlockedAt, parsed.BlockedAt);
-            Assert.Equal(original.StartedAt, parsed.StartedAt);
-            Assert.Equal(original.Created, parsed.Created);
-            Assert.Equal(original.Updated, parsed.Updated);
             Assert.Equal(original.Score.BusinessValue, parsed.Score.BusinessValue);
+            Assert.Equal(original.Score.TimeCriticality, parsed.Score.TimeCriticality);
+            Assert.Equal(original.Score.RiskReductionOpportunityEnablement, parsed.Score.RiskReductionOpportunityEnablement);
             Assert.Equal(original.Score.JobSize, parsed.Score.JobSize);
+        }
+
+        [Fact]
+        public void Omits_machine_bookkeeping_a_human_should_not_hand_maintain()
+        {
+            // Timestamps, phase, and work state live in the Sheet and in Drive's file metadata.
+            // Duplicating them here would mean a person hand-editing ISO-8601, and a stale copy
+            // is worse than no copy. The Activity Log carries the same story in prose.
+            var serialized = TicketDocument.Serialize(Sample(), "body");
+
+            Assert.DoesNotContain("created:", serialized);
+            Assert.DoesNotContain("updated:", serialized);
+            Assert.DoesNotContain("started_at:", serialized);
+            Assert.DoesNotContain("blocked_at:", serialized);
+            Assert.DoesNotContain("archived_at:", serialized);
+            Assert.DoesNotContain("phase:", serialized);
+            Assert.DoesNotContain("state:", serialized);
+        }
+
+        [Fact]
+        public void Still_reads_a_legacy_document_that_carries_the_old_fields()
+        {
+            var legacy = """
+                ---
+                id: NG-0001
+                title: Something
+                phase: in-progress
+                state: blocked
+                started_at: 2026-08-05T09:00:00Z
+                created: 2026-08-01T08:00:00Z
+                ---
+
+                body
+                """;
+
+            var ticket = TicketDocument.Parse(legacy).Ticket;
+
+            Assert.Equal(BacklogPhase.InProgress, ticket.Phase);
+            Assert.Equal(WorkState.Blocked, ticket.State);
+            Assert.Equal(new DateTimeOffset(2026, 8, 5, 9, 0, 0, TimeSpan.Zero), ticket.StartedAt);
+
+            // Read, but not written back — and not smuggled through ExtraFields either.
+            Assert.DoesNotContain("phase:", TicketDocument.Serialize(ticket, "body"));
         }
 
         [Fact]
@@ -120,8 +158,21 @@ namespace Noogen.Backlog.Tests
 
             var updated = TicketDocument.AppendActivity(body, when, "started");
 
-            Assert.Contains("- 2026-08-07T10:00:00Z — started", updated);
+            Assert.Contains("- 2026-08-07 10:00 UTC — started", updated);
             Assert.Equal(1, CountOccurrences(updated, "## Activity Log"));
+        }
+
+        [Fact]
+        public void Activity_entries_render_in_the_configured_timezone()
+        {
+            // The log is prose for people and is never parsed back, so it gets the readable local
+            // form. The offset is spelled out so it stays unambiguous.
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var when = new DateTimeOffset(2026, 8, 7, 10, 0, 0, TimeSpan.Zero);
+
+            var updated = TicketDocument.AppendActivity("body", when, "started", zone);
+
+            Assert.Contains("2026-08-07 06:00 -04:00 — started", updated);
         }
 
         [Fact]

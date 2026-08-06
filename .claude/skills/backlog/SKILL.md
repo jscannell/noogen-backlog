@@ -44,6 +44,15 @@ backlog restore <id>                            # Archive -> Backlog
 backlog doctor | backlog reindex                # health check / repair
 ```
 
+## Times
+
+Human output renders in the backlog's configured timezone; `--utc` opts out. **`--json` is always
+UTC** — parse that, and convert for display rather than assuming the human-readable form.
+
+Ticket documents deliberately carry **no timestamps, phase, or work state** in their frontmatter.
+Those live in the Sheet, in Drive's own file metadata, and narratively in the Activity Log. If
+asked when something started, use `backlog show <id>` rather than reading the document.
+
 ## Rules
 
 1. **Archive, never delete.** `backlog archive` moves the row and the document. Nothing is ever
@@ -51,6 +60,8 @@ backlog doctor | backlog reindex                # health check / repair
 
 2. **Go through the CLI.** The Sheet owns the `cod`, `wsjf`, and `rank` formulas. Writing those
    cells by hand breaks the index. `backlog doctor` detects the damage; `backlog reindex` repairs it.
+   Editing a ticket *document* by hand is fine and expected — it holds only human-editable
+   content, and `reindex` folds those edits back into the index.
 
 3. **Only unstarted work is ranked.** WSJF sequences what to *start*, so `score` is refused on a
    started item and its numbers freeze as history. Do not try to re-prioritise work in flight —

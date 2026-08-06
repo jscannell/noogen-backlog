@@ -159,11 +159,12 @@ namespace Noogen.Backlog.Cli
                   restore <id>                            Archive -> Backlog
 
                 MAINTENANCE
-                  init --drive <sharedDriveId>            One-time setup (idempotent)
+                  init --drive <id> [--timezone America/New_York]   One-time setup (idempotent)
                   doctor                                  Check the index for drift and duplicates
                   reindex                                 Rebuild rows from their documents
 
-                Every command accepts --json for machine-readable output.
+                Every command accepts --json for machine-readable output, which is always UTC.
+                Human output uses the backlog's configured timezone; --utc shows UTC instead.
                 WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20.
                 """);
         }

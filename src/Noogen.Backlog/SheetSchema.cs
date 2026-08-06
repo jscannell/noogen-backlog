@@ -73,8 +73,9 @@ namespace Noogen.Backlog
         public static readonly IReadOnlyList<string> FormulaColumns = [Cod, Wsjf, Rank];
 
         /// <summary>
-        /// Formatted as plain text at init so Sheets does not silently coerce an ISO-8601 string
-        /// into a locale-formatted date serial and break the round-trip.
+        /// Stored as real Sheets datetime serials, not text, and given a DATE_TIME number format
+        /// at init. Sheets then renders them in the spreadsheet's timezone, sorts them correctly
+        /// across DST, and can filter on them — none of which works with an opaque string.
         /// </summary>
         public static readonly IReadOnlyList<string> TimestampColumns = [Created, Updated, StartedAt, BlockedAt, ArchivedAt];
 
@@ -82,7 +83,10 @@ namespace Noogen.Backlog
         public static readonly IReadOnlyList<string> HiddenColumns = [DocId, DocUrl];
     }
 
-    /// <summary>A single compact UTC representation everywhere: Sheet cells, frontmatter, and JSON.</summary>
+    /// <summary>
+    /// Compact UTC text. Used for the CLI's JSON contract and for reading any timestamp a human
+    /// typed as text. Sheet cells are datetime serials — see <see cref="SheetTime"/>.
+    /// </summary>
     public static class Iso
     {
         public const string Format = "yyyy-MM-dd'T'HH:mm:ss'Z'";

@@ -110,6 +110,8 @@ namespace Noogen.Backlog
                 JobSize = ParseScore(Take(SheetSchema.Size), SheetSchema.Size)
             };
 
+            // These are no longer written, but a legacy or hand-edited document may still carry
+            // them. Read them so nothing regresses; they simply do not round-trip back out.
             ticket.Phase = ParsePhase(Take("phase"));
             ticket.State = Vocabulary.ParseOptional<WorkState>(Take(SheetSchema.State), SheetSchema.State);
             ticket.BlockedReason = Take(SheetSchema.BlockedReason);
@@ -133,6 +135,19 @@ namespace Noogen.Backlog
             return ticket;
         }
 
+        /// <summary>
+        /// Only fields a person would sensibly edit by hand.
+        ///
+        /// Deliberately absent: timestamps, phase, and work state. Those are machine bookkeeping,
+        /// and a document is something humans edit — hand-maintaining ISO-8601 in frontmatter is
+        /// hostile, and a hand-edited `phase` would desync from the tab that actually defines it.
+        /// The Sheet owns them, Drive's own createdTime/modifiedTime back up the first two, and
+        /// the Activity Log records every lifecycle event in prose. Nothing is lost by omitting
+        /// them here; a stale duplicate would be worse than no duplicate.
+        ///
+        /// Legacy documents that still carry those keys are read (see <see cref="ToTicket"/>) and
+        /// simply not written back.
+        /// </summary>
         static IEnumerable<KeyValuePair<string, string>> ToFields(Ticket ticket)
         {
             var fields = new List<KeyValuePair<string, string>>();
@@ -152,15 +167,6 @@ namespace Noogen.Backlog
             Add(SheetSchema.Tc, Format(ticket.Score.TimeCriticality));
             Add(SheetSchema.Rroe, Format(ticket.Score.RiskReductionOpportunityEnablement));
             Add(SheetSchema.Size, Format(ticket.Score.JobSize));
-            Add("phase", PhaseToWire(ticket.Phase));
-            Add(SheetSchema.State, ticket.State.HasValue ? Vocabulary.ToWire(ticket.State.Value) : null);
-            Add(SheetSchema.BlockedReason, ticket.BlockedReason);
-            Add(SheetSchema.BlockedAt, Iso.ToText(ticket.BlockedAt));
-            Add(SheetSchema.StartedAt, Iso.ToText(ticket.StartedAt));
-            Add(SheetSchema.Outcome, ticket.Outcome.HasValue ? Vocabulary.ToWire(ticket.Outcome.Value) : null);
-            Add(SheetSchema.ArchivedAt, Iso.ToText(ticket.ArchivedAt));
-            Add(SheetSchema.Created, Iso.ToText(ticket.Created));
-            Add(SheetSchema.Updated, Iso.ToText(ticket.Updated));
 
             foreach (var extra in ticket.ExtraFields)
                 Add(extra.Key, extra.Value);
@@ -194,7 +200,7 @@ namespace Noogen.Backlog
         internal static BacklogPhase ParsePhase(string? wire) =>
             string.IsNullOrWhiteSpace(wire) ? BacklogPhase.Backlog : Vocabulary.Parse<BacklogPhase>(wire.Trim(), "phase");
 
-        public static string BuildInitialBody(Ticket ticket, string? description)
+        public static string BuildInitialBody(Ticket ticket, string? description, TimeZoneInfo? zone = null)
         {
             var builder = new StringBuilder();
 
@@ -204,17 +210,21 @@ namespace Noogen.Backlog
             builder.Append("## Acceptance Criteria\n\n- [ ] _TODO_\n\n");
             builder.Append("## Notes\n\n");
             builder.Append("## Activity Log\n\n");
-            builder.Append("- ").Append(Iso.ToText(ticket.Created)).Append(" — created\n");
+            builder.Append("- ").Append(SheetTime.FormatWithZone(ticket.Created, zone ?? TimeZoneInfo.Utc)).Append(" — created\n");
 
             return builder.ToString();
         }
 
         const string ActivityHeading = "## Activity Log";
 
-        public static string AppendActivity(string body, DateTimeOffset when, string note)
+        /// <summary>
+        /// Appends a log entry rendered in the backlog's timezone. This is prose for people, never
+        /// parsed back, so it gets the readable local form rather than UTC.
+        /// </summary>
+        public static string AppendActivity(string body, DateTimeOffset when, string note, TimeZoneInfo? zone = null)
         {
             var normalized = (body ?? string.Empty).Replace("\r\n", "\n").TrimEnd('\n');
-            var entry = $"- {Iso.ToText(when)} — {note.Trim()}";
+            var entry = $"- {SheetTime.FormatWithZone(when, zone ?? TimeZoneInfo.Utc)} — {note.Trim()}";
 
             if (!normalized.Contains(ActivityHeading, StringComparison.Ordinal))
                 return $"{normalized}\n\n{ActivityHeading}\n\n{entry}\n";

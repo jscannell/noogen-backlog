@@ -43,17 +43,41 @@ These are the things to be careful about; most of the design follows from them.
    Humans reorder and add columns; that must keep working. Formulas are built from resolved
    column letters for the same reason.
 
-5. **Timestamps are ISO-8601 text.** The affected columns are set to the TEXT number format at
-   init, because Sheets otherwise coerces them into locale-formatted date serials and the
-   round-trip read returns something we never wrote.
+5. **Timestamps are real Sheets datetime serials, not text.** A serial is a fractional day
+   interpreted against the *spreadsheet's own timezone*, which buys native local rendering,
+   correct sorting across DST, and working date filters. Three consequences to respect:
+   - `SheetTime.ToSerial`/`FromSerial` **quantise to whole seconds**. A double cannot hold most
+     instants exactly, and without it 23:59:00 reads back as 23:58:59.9999998.
+   - The spreadsheet's `timeZone` property must equal `Config!timezone`. If they diverge every
+     stored instant shifts, so `doctor` reports a mismatch as an error and `init` reconciles it.
+   - The repeated hour at DST fall-back is genuinely ambiguous on read-back;
+     `SheetTime.FromWallClock` resolves it to the earlier instant, bounded at one hour, once a
+     year, on metrics reported in days. Spring-forward gaps shift forward rather than throw.
 
-6. **User text is escaped before it reaches a cell.** `SheetIndex.EscapeUserText` prefixes a
+6. **Reads are UNFORMATTED_VALUE, and numbers never route through `ToString()`.** Use
+   `SheetTable.Raw` plus `SheetTime.AsNumber` — a formatted read returns locale-rendered text,
+   and `double.ToString()` on a European machine emits a comma decimal separator.
+
+7. **Instants are canonical; the timezone is display and interpretation only.** Changing the
+   configured zone must never reinterpret history.
+
+8. **The document holds only what a human would edit** — id, title, type, area, owner, scores.
+   Timestamps, phase, and work state are machine bookkeeping: the Sheet owns them, Drive's
+   `createdTime`/`modifiedTime` back up the first two, and the Activity Log records lifecycle
+   events in prose. Never reintroduce them into frontmatter; a stale duplicate a human has to
+   hand-maintain is worse than no duplicate. Legacy documents carrying them are still read.
+
+9. **User text is escaped before it reaches a cell.** `SheetIndex.EscapeUserText` prefixes a
    leading `=`, `+`, `-`, or `@` with an apostrophe. A ticket title is untrusted input.
 
-7. **Archive, never delete.** Nothing in this codebase may trash a Drive file. Archiving moves it.
+10. **Archive, never delete.** Nothing here may trash a Drive file. Archiving moves it.
 
-8. **Document parse failures are `FormatException`.** `doctor` catches that to report a bad file
-   and continue; anything else aborts the sweep.
+11. **Document parse failures are `FormatException`.** `doctor` catches that to report a bad file
+    and continue; anything else aborts the sweep.
+
+12. **`--json` is always UTC.** Human output localises; the machine contract does not. The skill
+    and the future agent toolset parse that output, so a representation that moves with a config
+    setting would be a trap.
 
 ## Conventions
 

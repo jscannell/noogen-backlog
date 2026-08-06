@@ -156,6 +156,21 @@ namespace Noogen.Providers.GoogleWorkspace
             return file.WebViewLink;
         }
 
+        public async Task<DriveFileTimes> GetTimestampsAsync(string fileId, CancellationToken cancellationToken = default)
+        {
+            var request = Service.Files.Get(fileId);
+            request.Fields = "createdTime, modifiedTime";
+            request.SupportsAllDrives = true;
+
+            var file = await request.ExecuteAsync(cancellationToken);
+
+            return new DriveFileTimes
+            {
+                CreatedTime = file.CreatedTimeDateTimeOffset,
+                ModifiedTime = file.ModifiedTimeDateTimeOffset
+            };
+        }
+
         static void ApplySharedDriveSupport(FilesResource.ListRequest request)
         {
             request.SupportsAllDrives = true;

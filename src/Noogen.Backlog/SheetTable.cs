@@ -52,6 +52,23 @@ namespace Noogen.Backlog
 
         public string ColumnLetter(string column) => Providers.GoogleWorkspace.A1.Column(IndexOf(column));
 
+        /// <summary>
+        /// The cell as it came back from the API — a double for a number or date serial, a string
+        /// otherwise. Callers that care about numbers must use this rather than
+        /// <see cref="Value"/>, because ToString() on a double is culture-sensitive and would
+        /// produce a comma decimal separator on a European machine.
+        /// </summary>
+        public object? Raw(int dataRowIndex, string column)
+        {
+            if (!Has(column))
+                return null;
+
+            var row = Rows[dataRowIndex];
+            var index = IndexOf(column);
+
+            return index >= row.Count ? null : row[index];
+        }
+
         public string? Value(int dataRowIndex, string column)
         {
             if (!Has(column))

@@ -26,16 +26,27 @@ namespace Noogen.Backlog
 
         DateTimeOffset Now => _clock.GetUtcNow();
 
-        public async Task<BacklogSettings> GetSettingsAsync(CancellationToken cancellationToken = default) =>
+        /// <summary>
+        /// Also hands the configured timezone to the index. Datetime cells are wall-clock serials
+        /// interpreted against it, so nothing may read or write a timestamp before this has run —
+        /// which is why every entry point below starts here.
+        /// </summary>
+        public async Task<BacklogSettings> GetSettingsAsync(CancellationToken cancellationToken = default)
+        {
             _settings ??= await BacklogSettings.LoadAsync(_sheets, _spreadsheetId, cancellationToken);
+            _index.Zone = _settings.Zone;
+
+            return _settings;
+        }
 
         // --- queries ---
 
         public async Task<IReadOnlyList<Ticket>> ListAsync(TicketFilter filter, CancellationToken cancellationToken = default)
         {
+            await GetSettingsAsync(cancellationToken);
             var table = await _index.LoadAsync(BacklogPhase.Backlog, cancellationToken);
 
-            var tickets = SheetIndex.ToTickets(table)
+            var tickets = _index.ToTickets(table)
                 .Where(filter.Matches)
                 .OrderBy(ticket => ticket.Score.Value.HasValue ? 0 : 1)   // unscored sorts last
                 .ThenByDescending(ticket => ticket.Score.Value ?? 0)
@@ -47,9 +58,10 @@ namespace Noogen.Backlog
 
         public async Task<IReadOnlyList<Ticket>> WipAsync(TicketFilter filter, CancellationToken cancellationToken = default)
         {
+            await GetSettingsAsync(cancellationToken);
             var table = await _index.LoadAsync(BacklogPhase.InProgress, cancellationToken);
 
-            var tickets = SheetIndex.ToTickets(table)
+            var tickets = _index.ToTickets(table)
                 .Where(filter.Matches)
                 .OrderBy(ticket => ticket.StartedAt ?? DateTimeOffset.MaxValue)   // oldest first: aging surfaces
                 .ToList();
@@ -59,8 +71,9 @@ namespace Noogen.Backlog
 
         public async Task<FlowMetrics> FlowAsync(DateTimeOffset? since, CancellationToken cancellationToken = default)
         {
+            await GetSettingsAsync(cancellationToken);
             var table = await _index.LoadAsync(BacklogPhase.Archive, cancellationToken);
-            return FlowMetrics.From(SheetIndex.ToTickets(table), since);
+            return FlowMetrics.From(_index.ToTickets(table), since);
         }
 
         public async Task<Ticket?> GetAsync(string id, CancellationToken cancellationToken = default)
@@ -105,7 +118,7 @@ namespace Noogen.Backlog
                 Updated = now
             };
 
-            var body = TicketDocument.BuildInitialBody(ticket, request.Description);
+            var body = TicketDocument.BuildInitialBody(ticket, request.Description, settings.Zone);
             var fileName = $"{ticket.Id}-{Slug(ticket.Title)}.md";
 
             ticket.DocId = await _drive.CreateTextFileAsync(
@@ -336,6 +349,17 @@ namespace Noogen.Backlog
             var seen = new Dictionary<string, BacklogPhase>(StringComparer.OrdinalIgnoreCase);
             var referencedDocIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            // Datetime cells are wall-clock values read against the spreadsheet's own timezone. If
+            // that disagrees with the configured one, every stored instant silently shifts.
+            var spreadsheetZone = await _sheets.GetSpreadsheetTimeZoneAsync(_spreadsheetId, cancellationToken);
+            if (!string.IsNullOrEmpty(spreadsheetZone) && !string.Equals(spreadsheetZone, settings.TimeZoneId, StringComparison.OrdinalIgnoreCase))
+            {
+                report.Add(
+                    SheetSchema.ConfigTabName,
+                    "timezone-mismatch",
+                    $"The spreadsheet's timezone is '{spreadsheetZone}' but the config says '{settings.TimeZoneId}'. Every timestamp reads shifted. Run 'backlog init' to reconcile.");
+            }
+
             foreach (var table in tables)
             {
                 foreach (var expected in SheetSchema.Columns(table.Phase))
@@ -344,7 +368,7 @@ namespace Noogen.Backlog
                         report.Add(table.Phase.TabName(), "missing-column", $"Tab is missing the '{expected}' column.");
                 }
 
-                foreach (var ticket in SheetIndex.ToTickets(table))
+                foreach (var ticket in _index.ToTickets(table))
                 {
                     report.TicketCount++;
 
@@ -407,12 +431,23 @@ namespace Noogen.Backlog
         }
 
         /// <summary>
-        /// Rewrites every row from its document, repairing formulas, title hyperlinks, and any
-        /// field that drifted. Bounded on purpose: it repairs rows that exist, and does not
-        /// invent rows for orphaned documents — <c>doctor</c> reports those for a human to judge.
+        /// Repairs each row, merging three sources by who actually owns each field:
+        ///
+        /// - <b>Content</b> (title, type, area, owner, scores) comes from the document, since that
+        ///   is what a human edits.
+        /// - <b>Lifecycle</b> (phase, work state, started/blocked/archived, lead and cycle days)
+        ///   stays as the Sheet has it. The document deliberately no longer carries these, so
+        ///   taking them from there would blank them.
+        /// - <b>created / updated</b> come from Drive's own file metadata, which is authoritative
+        ///   and, for modifiedTime, better than anything we could maintain — it also catches a
+        ///   person editing the document directly.
+        ///
+        /// Bounded on purpose: it repairs rows that exist and does not invent rows for orphaned
+        /// documents, which <c>doctor</c> reports for a human to judge.
         /// </summary>
         public async Task<int> ReindexAsync(CancellationToken cancellationToken = default)
         {
+            await GetSettingsAsync(cancellationToken);
             var repaired = 0;
 
             foreach (var phase in BacklogPhaseExtensions.All)
@@ -421,20 +456,26 @@ namespace Noogen.Backlog
 
                 for (var rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
                 {
-                    var row = SheetIndex.ToTicket(table, rowIndex);
+                    var row = _index.ToTicket(table, rowIndex);
                     if (string.IsNullOrEmpty(row.Id) || string.IsNullOrEmpty(row.DocId))
                         continue;
 
                     var raw = await _drive.ReadTextFileAsync(row.DocId, cancellationToken);
-                    var fromDocument = TicketDocument.Parse(raw).Ticket;
+                    var document = TicketDocument.Parse(raw).Ticket;
+                    var times = await _drive.GetTimestampsAsync(row.DocId, cancellationToken);
 
-                    fromDocument.Phase = phase;
-                    fromDocument.DocId = row.DocId;
-                    fromDocument.DocUrl = row.DocUrl ?? await _drive.GetWebViewLinkAsync(row.DocId, cancellationToken);
-                    fromDocument.LeadDays = row.LeadDays;
-                    fromDocument.CycleDays = row.CycleDays;
+                    row.Title = document.Title;
+                    row.Type = document.Type;
+                    row.Area = document.Area;
+                    row.Owner = document.Owner;
+                    row.Score = document.Score;
 
-                    await _index.WriteRowAsync(table, fromDocument, rowIndex, cancellationToken);
+                    row.Created = times.CreatedTime ?? row.Created;
+                    row.Updated = times.ModifiedTime ?? row.Updated;
+
+                    row.DocUrl ??= await _drive.GetWebViewLinkAsync(row.DocId, cancellationToken);
+
+                    await _index.WriteRowAsync(table, row, rowIndex, cancellationToken);
                     repaired++;
                 }
             }
@@ -455,6 +496,8 @@ namespace Noogen.Backlog
 
         async Task<TicketLocation?> FindAsync(string id, CancellationToken cancellationToken)
         {
+            await GetSettingsAsync(cancellationToken);
+
             foreach (var phase in BacklogPhaseExtensions.All)
             {
                 var table = await _index.LoadAsync(phase, cancellationToken);
@@ -466,7 +509,7 @@ namespace Noogen.Backlog
                     {
                         Table = table,
                         DataRowIndex = rowIndex.Value,
-                        Ticket = SheetIndex.ToTicket(table, rowIndex.Value)
+                        Ticket = _index.ToTicket(table, rowIndex.Value)
                     };
                 }
             }
@@ -493,12 +536,13 @@ namespace Noogen.Backlog
             if (string.IsNullOrEmpty(ticket.DocId))
                 return;
 
+            var settings = await GetSettingsAsync(cancellationToken);
             var raw = await _drive.ReadTextFileAsync(ticket.DocId, cancellationToken);
             var document = TicketDocument.Parse(raw);
 
             var body = string.IsNullOrWhiteSpace(note)
                 ? document.Body
-                : TicketDocument.AppendActivity(document.Body, ticket.Updated, note);
+                : TicketDocument.AppendActivity(document.Body, ticket.Updated, note, settings.Zone);
 
             await _drive.UpdateTextFileAsync(
                 ticket.DocId,
@@ -548,8 +592,8 @@ namespace Noogen.Backlog
             if (row.Type != document.Type)
                 yield return $"type: sheet '{Vocabulary.ToWire(row.Type)}' vs document '{Vocabulary.ToWire(document.Type)}'.";
 
-            if (row.Phase != document.Phase)
-                yield return $"phase: sheet '{row.Phase.TabName()}' vs document '{document.Phase.TabName()}'.";
+            // No phase comparison: the document does not carry a phase. The tab it lives on is the
+            // only statement of state, so there is nothing to drift against.
 
             if (row.Score.BusinessValue != document.Score.BusinessValue
                 || row.Score.TimeCriticality != document.Score.TimeCriticality

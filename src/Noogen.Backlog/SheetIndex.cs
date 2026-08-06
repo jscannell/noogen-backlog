@@ -12,11 +12,18 @@ namespace Noogen.Backlog
         readonly ISheetsGateway _sheets;
         readonly string _spreadsheetId;
 
-        public SheetIndex(ISheetsGateway sheets, string spreadsheetId)
+        public SheetIndex(ISheetsGateway sheets, string spreadsheetId, TimeZoneInfo? zone = null)
         {
             _sheets = sheets;
             _spreadsheetId = spreadsheetId;
+            Zone = zone ?? TimeZoneInfo.Utc;
         }
+
+        /// <summary>
+        /// The timezone the spreadsheet's datetime cells are interpreted against. Must match the
+        /// spreadsheet's own timeZone property or every stored instant shifts; doctor checks it.
+        /// </summary>
+        public TimeZoneInfo Zone { get; set; }
 
         public async Task<SheetTable> LoadAsync(BacklogPhase phase, CancellationToken cancellationToken = default)
         {
@@ -35,7 +42,7 @@ namespace Noogen.Backlog
 
         // --- reading ---
 
-        public static Ticket ToTicket(SheetTable table, int dataRowIndex)
+        public Ticket ToTicket(SheetTable table, int dataRowIndex)
         {
             var ticket = new Ticket
             {
@@ -62,23 +69,20 @@ namespace Noogen.Backlog
             ticket.Rank = ReadInt(table, dataRowIndex, SheetSchema.Rank);
             ticket.State = Vocabulary.ParseOptional<WorkState>(table.Value(dataRowIndex, SheetSchema.State), SheetSchema.State);
             ticket.BlockedReason = table.Value(dataRowIndex, SheetSchema.BlockedReason);
-            ticket.BlockedAt = Iso.ParseOptional(table.Value(dataRowIndex, SheetSchema.BlockedAt), SheetSchema.BlockedAt);
-            ticket.StartedAt = Iso.ParseOptional(table.Value(dataRowIndex, SheetSchema.StartedAt), SheetSchema.StartedAt);
+            ticket.BlockedAt = ReadTimestamp(table, dataRowIndex, SheetSchema.BlockedAt);
+            ticket.StartedAt = ReadTimestamp(table, dataRowIndex, SheetSchema.StartedAt);
             ticket.Outcome = Vocabulary.ParseOptional<Outcome>(table.Value(dataRowIndex, SheetSchema.Outcome), SheetSchema.Outcome);
-            ticket.ArchivedAt = Iso.ParseOptional(table.Value(dataRowIndex, SheetSchema.ArchivedAt), SheetSchema.ArchivedAt);
+            ticket.ArchivedAt = ReadTimestamp(table, dataRowIndex, SheetSchema.ArchivedAt);
             ticket.LeadDays = ReadDouble(table, dataRowIndex, SheetSchema.LeadDays);
             ticket.CycleDays = ReadDouble(table, dataRowIndex, SheetSchema.CycleDays);
 
-            var created = table.Value(dataRowIndex, SheetSchema.Created);
-            ticket.Created = created is null ? default : Iso.Parse(created, SheetSchema.Created);
-
-            var updated = table.Value(dataRowIndex, SheetSchema.Updated);
-            ticket.Updated = updated is null ? ticket.Created : Iso.Parse(updated, SheetSchema.Updated);
+            ticket.Created = ReadTimestamp(table, dataRowIndex, SheetSchema.Created) ?? default;
+            ticket.Updated = ReadTimestamp(table, dataRowIndex, SheetSchema.Updated) ?? ticket.Created;
 
             return ticket;
         }
 
-        public static IReadOnlyList<Ticket> ToTickets(SheetTable table)
+        public IReadOnlyList<Ticket> ToTickets(SheetTable table)
         {
             var tickets = new List<Ticket>();
             for (var i = 0; i < table.Rows.Count; i++)
@@ -144,7 +148,7 @@ namespace Noogen.Backlog
         /// Backlog tab and frozen values everywhere else — the store never computes a value into
         /// a cell the Sheet owns.
         /// </summary>
-        internal static IList<object> BuildRow(SheetTable table, Ticket ticket, int dataRowIndex)
+        internal IList<object> BuildRow(SheetTable table, Ticket ticket, int dataRowIndex)
         {
             var rowNumber = SheetTable.SheetRowNumber(dataRowIndex);
             var live = table.Phase.UsesLiveFormulas();
@@ -156,7 +160,7 @@ namespace Noogen.Backlog
             return values;
         }
 
-        static object BuildCell(SheetTable table, Ticket ticket, string header, int rowNumber, bool live)
+        object BuildCell(SheetTable table, Ticket ticket, string header, int rowNumber, bool live)
         {
             switch (header)
             {
@@ -189,21 +193,21 @@ namespace Noogen.Backlog
                 case SheetSchema.BlockedReason:
                     return EscapeUserText(ticket.BlockedReason);
                 case SheetSchema.BlockedAt:
-                    return Iso.ToText(ticket.BlockedAt) ?? string.Empty;
+                    return Timestamp(ticket.BlockedAt);
                 case SheetSchema.StartedAt:
-                    return Iso.ToText(ticket.StartedAt) ?? string.Empty;
+                    return Timestamp(ticket.StartedAt);
                 case SheetSchema.Outcome:
                     return ticket.Outcome.HasValue ? Vocabulary.ToWire(ticket.Outcome.Value) : string.Empty;
                 case SheetSchema.ArchivedAt:
-                    return Iso.ToText(ticket.ArchivedAt) ?? string.Empty;
+                    return Timestamp(ticket.ArchivedAt);
                 case SheetSchema.LeadDays:
                     return Number(ticket.LeadDays);
                 case SheetSchema.CycleDays:
                     return Number(ticket.CycleDays);
                 case SheetSchema.Created:
-                    return Iso.ToText(ticket.Created);
+                    return Timestamp(ticket.Created);
                 case SheetSchema.Updated:
-                    return Iso.ToText(ticket.Updated);
+                    return Timestamp(ticket.Updated);
                 case SheetSchema.DocId:
                     return ticket.DocId ?? string.Empty;
                 case SheetSchema.DocUrl:
@@ -253,27 +257,38 @@ namespace Noogen.Backlog
             return first is '=' or '+' or '@' or '-' ? "'" + text : text;
         }
 
+        /// <summary>
+        /// Written as a real Sheets datetime serial, not text, so the Sheet renders it in the
+        /// spreadsheet's timezone, sorts it numerically, and can filter on it.
+        /// </summary>
+        object Timestamp(DateTimeOffset? instant) =>
+            instant.HasValue && instant.Value != default ? SheetTime.ToSerial(instant.Value, Zone) : string.Empty;
+
+        DateTimeOffset? ReadTimestamp(SheetTable table, int dataRowIndex, string column)
+        {
+            var raw = table.Raw(dataRowIndex, column);
+
+            var serial = SheetTime.AsNumber(raw);
+            if (serial.HasValue)
+                return SheetTime.FromSerial(serial.Value, Zone);
+
+            // Tolerates a cell a human typed as text, or a row written before the datetime
+            // migration. Offsets are honoured; a bare value is read as UTC.
+            var text = raw?.ToString();
+            return string.IsNullOrWhiteSpace(text) ? null : Iso.ParseOptional(text, column);
+        }
+
         static object Number(int? value) => value.HasValue ? value.Value : string.Empty;
 
-        static object Number(double? value) =>
-            value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : string.Empty;
+        static object Number(double? value) => value.HasValue ? value.Value : string.Empty;
 
         static int? ReadInt(SheetTable table, int dataRowIndex, string column)
         {
-            var text = table.Value(dataRowIndex, column);
-            if (text is null)
-                return null;
-
-            return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+            var value = SheetTime.AsNumber(table.Raw(dataRowIndex, column));
+            return value.HasValue ? (int)Math.Round(value.Value) : null;
         }
 
-        static double? ReadDouble(SheetTable table, int dataRowIndex, string column)
-        {
-            var text = table.Value(dataRowIndex, column);
-            if (text is null)
-                return null;
-
-            return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
-        }
+        static double? ReadDouble(SheetTable table, int dataRowIndex, string column) =>
+            SheetTime.AsNumber(table.Raw(dataRowIndex, column));
     }
 }

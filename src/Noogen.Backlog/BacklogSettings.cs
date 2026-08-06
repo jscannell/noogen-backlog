@@ -14,6 +14,7 @@ namespace Noogen.Backlog
         public const string IdPrefixKey = "id_prefix";
         public const string IdWidthKey = "id_width";
         public const string WipLimitKey = "wip_limit";
+        public const string TimeZoneKey = "timezone";
         public const string TicketsFolderKey = "tickets_folder_id";
         public const string ArchiveFolderKey = "archive_folder_id";
 
@@ -22,6 +23,17 @@ namespace Noogen.Backlog
         public int IdWidth { get; set; } = 4;
 
         public int WipLimit { get; set; } = 5;
+
+        /// <summary>
+        /// IANA id, e.g. America/New_York. Governs how Sheets renders datetime cells and how the
+        /// CLI displays times. Instants are stored canonically — this is a display and
+        /// interpretation setting, not a change of what a timestamp means.
+        /// </summary>
+        public string TimeZoneId { get; set; } = "UTC";
+
+        TimeZoneInfo? _zone;
+
+        public TimeZoneInfo Zone => _zone ??= SheetTime.ResolveZone(TimeZoneId);
 
         public string TicketsFolderId { get; set; } = string.Empty;
 
@@ -67,6 +79,9 @@ namespace Noogen.Backlog
             if (map.TryGetValue(WipLimitKey, out var wip) && int.TryParse(wip, out var parsedWip))
                 settings.WipLimit = parsedWip;
 
+            if (map.TryGetValue(TimeZoneKey, out var timeZone))
+                settings.TimeZoneId = timeZone;
+
             if (map.TryGetValue(TicketsFolderKey, out var tickets))
                 settings.TicketsFolderId = tickets;
 
@@ -82,6 +97,7 @@ namespace Noogen.Backlog
             [IdPrefixKey, IdPrefix, "Ticket id prefix."],
             [IdWidthKey, IdWidth, "Zero-padding width for the numeric part."],
             [WipLimitKey, WipLimit, "Kanban WIP limit. 'backlog start' refuses to exceed it without --force."],
+            [TimeZoneKey, TimeZoneId, "IANA id, e.g. America/New_York. Must match the spreadsheet's own timezone; 'backlog doctor' checks it."],
             [TicketsFolderKey, TicketsFolderId, "Drive folder holding active ticket documents."],
             [ArchiveFolderKey, ArchiveFolderId, "Drive folder root for archived ticket documents (year/quarter beneath)."],
             [string.Empty, string.Empty, string.Empty],

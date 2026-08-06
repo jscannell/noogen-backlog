@@ -12,6 +12,8 @@ namespace Noogen.Backlog
 
         public string ArchiveFolderId { get; set; } = string.Empty;
 
+        public string TimeZoneId { get; set; } = string.Empty;
+
         public bool CreatedSpreadsheet { get; set; }
     }
 
@@ -35,7 +37,7 @@ namespace Noogen.Backlog
             _sheets = sheets;
         }
 
-        public async Task<InitResult> RunAsync(string rootFolderId, string? existingSpreadsheetId = null, CancellationToken cancellationToken = default)
+        public async Task<InitResult> RunAsync(string rootFolderId, string? existingSpreadsheetId = null, string? timeZoneId = null, CancellationToken cancellationToken = default)
         {
             var result = new InitResult();
 
@@ -59,10 +61,15 @@ namespace Noogen.Backlog
             result.ArchiveFolderId = archiveFolderId;
             result.SpreadsheetUrl = await _drive.GetWebViewLinkAsync(spreadsheetId, cancellationToken);
 
+            var settings = await EnsureConfigTabAsync(spreadsheetId, ticketsFolderId, archiveFolderId, timeZoneId, cancellationToken);
+            result.TimeZoneId = settings.TimeZoneId;
+
+            // Datetime cells are wall-clock values interpreted against the spreadsheet's own
+            // timezone, so it has to agree with the config or every instant we store shifts.
+            await _sheets.SetSpreadsheetTimeZoneAsync(spreadsheetId, settings.TimeZoneId, cancellationToken);
+
             foreach (var phase in BacklogPhaseExtensions.All)
                 await EnsureLifecycleTabAsync(spreadsheetId, phase, cancellationToken);
-
-            await EnsureConfigTabAsync(spreadsheetId, ticketsFolderId, archiveFolderId, cancellationToken);
 
             return result;
         }
@@ -85,13 +92,13 @@ namespace Noogen.Backlog
 
             var table = new SheetTable(phase, await _sheets.GetValuesAsync(spreadsheetId, A1.WholeTab(tabName), cancellationToken));
 
-            // Timestamps are written as ISO-8601 strings. Without an explicit TEXT format Sheets
-            // coerces them into locale-formatted date serials and the round-trip read comes back
-            // as something we never wrote.
+            // Timestamps are real datetime cells, so Sheets renders them in the spreadsheet's
+            // timezone, sorts them numerically, and can filter on them. The pattern keeps the
+            // display unambiguous rather than locale-dependent.
             foreach (var column in SheetSchema.TimestampColumns)
             {
                 if (table.Has(column))
-                    await _sheets.SetColumnTextFormatAsync(spreadsheetId, tabName, table.IndexOf(column), cancellationToken);
+                    await _sheets.SetColumnDateTimeFormatAsync(spreadsheetId, tabName, table.IndexOf(column), SheetTime.DisplayPattern, cancellationToken);
             }
 
             foreach (var column in SheetSchema.HiddenColumns)
@@ -104,7 +111,7 @@ namespace Noogen.Backlog
             }
         }
 
-        async Task EnsureConfigTabAsync(string spreadsheetId, string ticketsFolderId, string archiveFolderId, CancellationToken cancellationToken)
+        async Task<BacklogSettings> EnsureConfigTabAsync(string spreadsheetId, string ticketsFolderId, string archiveFolderId, string? timeZoneId, CancellationToken cancellationToken)
         {
             await _sheets.EnsureTabAsync(spreadsheetId, SheetSchema.ConfigTabName, cancellationToken);
 
@@ -112,12 +119,20 @@ namespace Noogen.Backlog
             existing.TicketsFolderId = ticketsFolderId;
             existing.ArchiveFolderId = archiveFolderId;
 
+            if (!string.IsNullOrWhiteSpace(timeZoneId))
+                existing.TimeZoneId = timeZoneId.Trim();
+
+            // Validates the id and fails with a useful message before anything is written.
+            _ = existing.Zone;
+
             // Anchored at A1 so the write expands to fit however many rows ToRows() produces.
             await _sheets.UpdateValuesAsync(
                 spreadsheetId,
                 A1.Anchor(SheetSchema.ConfigTabName, 0, 0),
                 existing.ToRows(),
                 cancellationToken);
+
+            return existing;
         }
     }
 }

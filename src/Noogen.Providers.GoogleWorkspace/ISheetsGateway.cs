@@ -6,6 +6,11 @@ namespace Noogen.Providers.GoogleWorkspace
     /// </summary>
     public interface ISheetsGateway
     {
+        /// <summary>
+        /// Reads unformatted values: numbers arrive as numbers and date cells as serials, rather
+        /// than as locale-rendered text. Anything that needs to survive a round-trip depends on
+        /// this — a formatted read would hand back whatever the viewer's locale happens to show.
+        /// </summary>
         Task<IList<IList<object>>> GetValuesAsync(string spreadsheetId, string range, CancellationToken cancellationToken = default);
 
         /// <summary>Writes with USER_ENTERED so formula strings are stored as formulas.</summary>
@@ -32,10 +37,18 @@ namespace Noogen.Providers.GoogleWorkspace
         Task HideColumnsAsync(string spreadsheetId, string tabName, int startColumnIndex, int endColumnIndex, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Forces a column to the TEXT number format. Without it Sheets coerces our ISO-8601
-        /// timestamp strings into locale-formatted date serials, and reads come back as
-        /// something we never wrote.
+        /// Applies a date-time number format to a column, so real datetime cells render as
+        /// readable local times in the spreadsheet's own timezone.
         /// </summary>
-        Task SetColumnTextFormatAsync(string spreadsheetId, string tabName, int columnIndex, CancellationToken cancellationToken = default);
+        Task SetColumnDateTimeFormatAsync(string spreadsheetId, string tabName, int columnIndex, string pattern, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// The spreadsheet's timezone (CLDR/IANA, e.g. America/New_York). Datetime cells are
+        /// wall-clock values interpreted against this, so it must match the backlog's configured
+        /// timezone or every stored instant shifts.
+        /// </summary>
+        Task<string?> GetSpreadsheetTimeZoneAsync(string spreadsheetId, CancellationToken cancellationToken = default);
+
+        Task SetSpreadsheetTimeZoneAsync(string spreadsheetId, string timeZoneId, CancellationToken cancellationToken = default);
     }
 }

@@ -38,9 +38,12 @@ namespace Noogen.Backlog.Tests
 
         public Dictionary<string, string> Links { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public List<string> TextFormattedColumns { get; } = [];
+        public List<string> DateTimeFormattedColumns { get; } = [];
 
         public List<string> HiddenColumns { get; } = [];
+
+        /// <summary>Mirrors the spreadsheet's own timeZone property, which init sets.</summary>
+        public string? TimeZoneId { get; set; }
 
         /// <summary>Set to make the next DeleteRow throw, simulating an interrupted cross-tab move.</summary>
         public bool FailNextDeleteRow { get; set; }
@@ -165,9 +168,18 @@ namespace Noogen.Backlog.Tests
             return Task.CompletedTask;
         }
 
-        public Task SetColumnTextFormatAsync(string spreadsheetId, string tabName, int columnIndex, CancellationToken cancellationToken = default)
+        public Task SetColumnDateTimeFormatAsync(string spreadsheetId, string tabName, int columnIndex, string pattern, CancellationToken cancellationToken = default)
         {
-            TextFormattedColumns.Add($"{tabName}!{columnIndex}");
+            DateTimeFormattedColumns.Add($"{tabName}!{columnIndex}");
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> GetSpreadsheetTimeZoneAsync(string spreadsheetId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(TimeZoneId);
+
+        public Task SetSpreadsheetTimeZoneAsync(string spreadsheetId, string timeZoneId, CancellationToken cancellationToken = default)
+        {
+            TimeZoneId = timeZoneId;
             return Task.CompletedTask;
         }
 
@@ -229,6 +241,10 @@ namespace Noogen.Backlog.Tests
             public string MimeType { get; set; } = string.Empty;
 
             public string Content { get; set; } = string.Empty;
+
+            public DateTimeOffset CreatedTime { get; set; }
+
+            public DateTimeOffset ModifiedTime { get; set; }
         }
 
         readonly Dictionary<string, Node> _nodes = new(StringComparer.OrdinalIgnoreCase);
@@ -282,6 +298,8 @@ namespace Noogen.Backlog.Tests
         public Task UpdateTextFileAsync(string fileId, string content, string mimeType, CancellationToken cancellationToken = default)
         {
             _nodes[fileId].Content = content;
+            _nodes[fileId].ModifiedTime = Clock.GetUtcNow();
+
             return Task.CompletedTask;
         }
 
@@ -294,16 +312,40 @@ namespace Noogen.Backlog.Tests
         public Task<string> GetWebViewLinkAsync(string fileId, CancellationToken cancellationToken = default) =>
             Task.FromResult($"https://drive.google.com/file/d/{fileId}/view");
 
+        public Task<DriveFileTimes> GetTimestampsAsync(string fileId, CancellationToken cancellationToken = default)
+        {
+            var node = _nodes[fileId];
+
+            return Task.FromResult(new DriveFileTimes
+            {
+                CreatedTime = node.CreatedTime,
+                ModifiedTime = node.ModifiedTime
+            });
+        }
+
+        /// <summary>Lets a test drive Drive's own clock, which reindex trusts over the document.</summary>
+        public TimeProvider Clock { get; set; } = TimeProvider.System;
+
+        public void SetTimestamps(string fileId, DateTimeOffset created, DateTimeOffset modified)
+        {
+            _nodes[fileId].CreatedTime = created;
+            _nodes[fileId].ModifiedTime = modified;
+        }
+
         string Add(string parentId, string name, string mimeType, string content)
         {
             var id = NewId();
+            var now = Clock.GetUtcNow();
+
             _nodes[id] = new Node
             {
                 Id = id,
                 Name = name,
                 ParentId = parentId,
                 MimeType = mimeType,
-                Content = content
+                Content = content,
+                CreatedTime = now,
+                ModifiedTime = now
             };
 
             return id;

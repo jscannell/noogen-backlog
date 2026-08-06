@@ -15,6 +15,23 @@ namespace Noogen.Backlog.Cli
 
         static DateTimeOffset Now => DateTimeOffset.UtcNow;
 
+        /// <summary>
+        /// Human output renders in the backlog's configured timezone; --utc opts out. JSON is
+        /// deliberately never localised — it is the machine contract the skill and the future
+        /// agent toolset parse, and a moving representation there would be a trap.
+        /// </summary>
+        static async Task<TimeZoneInfo> ZoneAsync(CommandLine command, IBacklogStore store)
+        {
+            if (command.HasFlag("utc"))
+                return TimeZoneInfo.Utc;
+
+            var settings = await store.GetSettingsAsync();
+            return settings.Zone;
+        }
+
+        static string When(DateTimeOffset? instant, TimeZoneInfo zone) =>
+            instant.HasValue && instant.Value != default ? SheetTime.FormatWithZone(instant.Value, zone) : "-";
+
         // --- setup ---
 
         public async Task<int> InitAsync(CommandLine command)
@@ -22,11 +39,15 @@ namespace Noogen.Backlog.Cli
             var driveId = command.Option("drive") ?? _config.SharedDriveId
                 ?? throw new UsageException("--drive <sharedDriveId> is required the first time.");
 
+            // Seeds from this machine on first run; thereafter the Config tab wins unless
+            // --timezone is passed explicitly.
+            var timeZoneId = command.Option("timezone") ?? (_config.SpreadsheetId is null ? SheetTime.LocalIanaId() : null);
+
             var initializer = new BacklogInitializer(
                 new DriveGateway(new DriveClientFactory()),
                 new SheetsGateway(new SheetsClientFactory()));
 
-            var result = await initializer.RunAsync(driveId, _config.SpreadsheetId);
+            var result = await initializer.RunAsync(driveId, _config.SpreadsheetId, timeZoneId);
 
             _config.SharedDriveId = driveId;
             _config.SpreadsheetId = result.SpreadsheetId;
@@ -39,10 +60,11 @@ namespace Noogen.Backlog.Cli
             }
 
             Output.WriteLine(result.CreatedSpreadsheet ? "Created the backlog index." : "Backlog index already existed — verified and repaired.");
-            Output.WriteLine($"  index    {result.SpreadsheetUrl}");
-            Output.WriteLine($"  tickets  {result.TicketsFolderId}");
-            Output.WriteLine($"  archive  {result.ArchiveFolderId}");
-            Output.WriteLine($"  config   {LocalConfig.Path}");
+            Output.WriteLine($"  index     {result.SpreadsheetUrl}");
+            Output.WriteLine($"  tickets   {result.TicketsFolderId}");
+            Output.WriteLine($"  archive   {result.ArchiveFolderId}");
+            Output.WriteLine($"  timezone  {result.TimeZoneId}");
+            Output.WriteLine($"  config    {LocalConfig.Path}");
             return 0;
         }
 
@@ -123,12 +145,14 @@ namespace Noogen.Backlog.Cli
                 return 0;
             }
 
+            var zone = await ZoneAsync(command, store);
+
             Output.WriteLine($"{tickets.Count} of {settings.WipLimit} in flight" +
                 (threshold.HasValue ? $"; aging past {Output.Number(threshold)}d (p85 cycle time)" : string.Empty));
             Output.WriteLine();
 
             Output.WriteTable(
-                ["id", "state", "age", "owner", "title", "blocked because"],
+                ["id", "state", "started", "age", "owner", "title", "blocked because"],
                 tickets.Select(ticket =>
                 {
                     var age = ticket.AgeDays(now);
@@ -138,6 +162,7 @@ namespace Noogen.Backlog.Cli
                     [
                         ticket.Id,
                         ticket.State.HasValue ? Vocabulary.ToWire(ticket.State.Value) : "-",
+                        When(ticket.StartedAt, zone),
                         (aging ? "! " : string.Empty) + Output.Number(age) + "d",
                         Output.Text(ticket.Owner),
                         ticket.Title,
@@ -160,7 +185,8 @@ namespace Noogen.Backlog.Cli
                 return 0;
             }
 
-            Output.WriteLine(since.HasValue ? $"Flow since {Iso.ToText(since.Value)}" : "Flow (all time)");
+            var zone = await ZoneAsync(command, store);
+            Output.WriteLine(since.HasValue ? $"Flow since {When(since.Value, zone)}" : "Flow (all time)");
             Output.WriteLine($"  throughput      {flow.Throughput} done");
             Output.WriteLine($"  cycle time p50  {Output.Number(flow.CycleTimeP50)}d");
             Output.WriteLine($"  cycle time p85  {Output.Number(flow.CycleTimeP85)}d");
@@ -196,6 +222,12 @@ namespace Noogen.Backlog.Cli
 
             if (ticket.Outcome.HasValue)
                 Output.WriteLine($"  outcome {Vocabulary.ToWire(ticket.Outcome.Value)}   lead {Output.Number(ticket.LeadDays)}d   cycle {Output.Number(ticket.CycleDays)}d");
+
+            var zone = await ZoneAsync(command, store);
+            Output.WriteLine($"  created {When(ticket.Created, zone)}   updated {When(ticket.Updated, zone)}");
+
+            if (ticket.StartedAt.HasValue || ticket.ArchivedAt.HasValue)
+                Output.WriteLine($"  started {When(ticket.StartedAt, zone)}   archived {When(ticket.ArchivedAt, zone)}");
 
             Output.WriteLine($"  {Output.Text(ticket.DocUrl)}");
             Output.WriteLine();
