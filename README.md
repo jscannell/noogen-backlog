@@ -127,12 +127,28 @@ That breadth is the reason token protection matters, and worth weighing before r
 grant of access. It tells Google's consent screen which application is asking. Everyone in the
 organisation uses the same one; individual identity comes from `backlog login`.
 
+**Which console?** You create it in **Google Cloud** (`console.cloud.google.com`), not in Workspace
+admin. Workspace matters in exactly two ways, both covered below: it is what makes the *Internal*
+option available, and it is where an admin can allowlist or revoke the app afterwards.
+
+This is **not** domain-wide delegation. The Gmail integration in the platform repo uses DWD, set up
+in `admin.google.com`, where a service account is authorised to impersonate users. Nothing like
+that is needed here, and there is no reason to visit that page for this.
+
+**Prerequisite: the Cloud project must belong to your Workspace organisation.** Open the project
+picker in the Cloud console and check the **Organization** column shows your domain rather than
+"No organization". If the project was created under a personal account, the *Internal* user type
+is simply not offered, and you would be pushed toward External and Google's verification review.
+Move the project into the org, or use one that already lives there.
+
 **Created once, by one person, for everyone.**
 
-1. Cloud console → **APIs & Services → OAuth consent screen**
-   - User Type: **Internal**. This is the important choice: internal apps are limited to your
-     Workspace domain and skip Google's verification review entirely. `drive` is a *restricted*
-     scope, so an External app would face a lengthy security assessment before anyone could use it.
+1. Cloud console → **APIs & Services → OAuth consent screen** (newer consoles: **Google Auth
+   Platform**)
+   - User Type / Audience: **Internal**. This is the consequential choice: internal apps are
+     limited to your Workspace domain and skip Google's verification review entirely. `drive` is a
+     *restricted* scope, so an External app would face a lengthy security assessment before anyone
+     could use it.
    - Add the scopes `drive`, `spreadsheets`, `openid`, `email`.
 2. → **Credentials → Create Credentials → OAuth client ID**
    - Application type: **Desktop app**. Not "Web application" — a web client cannot drive the
@@ -140,6 +156,12 @@ organisation uses the same one; individual identity comes from `backlog login`.
 3. **Download JSON** and save it to `%APPDATA%\Noogen\oauth.json` — unedited, exactly as Google
    gives it to you. On macOS and Linux that path is `~/.config/Noogen/oauth.json`.
 4. Use the **same GCP project** that has the Drive API and Sheets API enabled.
+
+**Where Workspace admin does come in.** If your org restricts third-party app access
+(Admin console → Security → Access and data control → **API controls → App access control**), an
+admin may need to mark this client ID as **Trusted** before anyone can consent — strict orgs block
+unconfigured apps by default. That same page is where you revoke the app org-wide if a machine is
+ever compromised.
 
 **What the file looks like.** Google's download:
 
