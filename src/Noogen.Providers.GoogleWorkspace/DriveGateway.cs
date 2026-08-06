@@ -1,0 +1,165 @@
+using System.Text;
+using Google.Apis.Drive.v3;
+
+// Drive's metadata type collides with System.IO.File, which ImplicitUsings brings in.
+using DriveFile = Google.Apis.Drive.v3.Data.File;
+
+namespace Noogen.Providers.GoogleWorkspace
+{
+    public class DriveGateway : IDriveGateway
+    {
+        public const string FolderMimeType = "application/vnd.google-apps.folder";
+        public const string SpreadsheetMimeType = "application/vnd.google-apps.spreadsheet";
+        public const string MarkdownMimeType = "text/markdown";
+
+        readonly IDriveClientFactory _factory;
+
+        public DriveGateway(IDriveClientFactory factory)
+        {
+            _factory = factory;
+        }
+
+        DriveService Service => _factory.Create();
+
+        public async Task<string?> FindChildAsync(string parentId, string name, string? mimeType, CancellationToken cancellationToken = default)
+        {
+            var escaped = name.Replace("\\", "\\\\").Replace("'", "\\'");
+            var query = $"'{parentId}' in parents and name = '{escaped}' and trashed = false";
+            if (!string.IsNullOrEmpty(mimeType))
+                query += $" and mimeType = '{mimeType}'";
+
+            var request = Service.Files.List();
+            request.Q = query;
+            request.Fields = "files(id, name)";
+            request.PageSize = 2;
+            ApplySharedDriveSupport(request);
+
+            var response = await request.ExecuteAsync(cancellationToken);
+            return response.Files.Count > 0 ? response.Files[0].Id : null;
+        }
+
+        public async Task<IReadOnlyList<DriveEntry>> ListChildrenAsync(string parentId, string? mimeType, CancellationToken cancellationToken = default)
+        {
+            var query = $"'{parentId}' in parents and trashed = false";
+            if (!string.IsNullOrEmpty(mimeType))
+                query += $" and mimeType = '{mimeType}'";
+
+            var entries = new List<DriveEntry>();
+            string? pageToken = null;
+
+            do
+            {
+                var request = Service.Files.List();
+                request.Q = query;
+                request.Fields = "nextPageToken, files(id, name)";
+                request.PageSize = 200;
+                request.PageToken = pageToken;
+                ApplySharedDriveSupport(request);
+
+                var response = await request.ExecuteAsync(cancellationToken);
+
+                foreach (var file in response.Files)
+                    entries.Add(new DriveEntry { Id = file.Id, Name = file.Name });
+
+                pageToken = response.NextPageToken;
+            }
+            while (!string.IsNullOrEmpty(pageToken));
+
+            return entries;
+        }
+
+        public Task<string> CreateFolderAsync(string parentId, string name, CancellationToken cancellationToken = default) =>
+            CreateEmptyAsync(parentId, name, FolderMimeType, cancellationToken);
+
+        public Task<string> CreateSpreadsheetAsync(string parentId, string name, CancellationToken cancellationToken = default) =>
+            CreateEmptyAsync(parentId, name, SpreadsheetMimeType, cancellationToken);
+
+        async Task<string> CreateEmptyAsync(string parentId, string name, string mimeType, CancellationToken cancellationToken)
+        {
+            var metadata = new DriveFile
+            {
+                Name = name,
+                MimeType = mimeType,
+                Parents = [parentId]
+            };
+
+            var request = Service.Files.Create(metadata);
+            request.Fields = "id";
+            request.SupportsAllDrives = true;
+
+            var created = await request.ExecuteAsync(cancellationToken);
+            return created.Id;
+        }
+
+        public async Task<string> CreateTextFileAsync(string parentId, string name, string content, string mimeType, CancellationToken cancellationToken = default)
+        {
+            var metadata = new DriveFile
+            {
+                Name = name,
+                Parents = [parentId]
+            };
+
+            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+
+            var request = Service.Files.Create(metadata, stream, mimeType);
+            request.Fields = "id";
+            request.SupportsAllDrives = true;
+
+            var progress = await request.UploadAsync(cancellationToken);
+            if (progress.Exception is not null)
+                throw progress.Exception;
+
+            return request.ResponseBody.Id;
+        }
+
+        public async Task<string> ReadTextFileAsync(string fileId, CancellationToken cancellationToken = default)
+        {
+            var request = Service.Files.Get(fileId);
+            request.SupportsAllDrives = true;
+
+            using var stream = new MemoryStream();
+            await request.DownloadAsync(stream, cancellationToken);
+
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+
+        public async Task UpdateTextFileAsync(string fileId, string content, string mimeType, CancellationToken cancellationToken = default)
+        {
+            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+
+            var request = Service.Files.Update(new DriveFile(), fileId, stream, mimeType);
+            request.SupportsAllDrives = true;
+
+            var progress = await request.UploadAsync(cancellationToken);
+            if (progress.Exception is not null)
+                throw progress.Exception;
+        }
+
+        public async Task MoveAsync(string fileId, string addParentId, string removeParentId, CancellationToken cancellationToken = default)
+        {
+            var request = Service.Files.Update(new DriveFile(), fileId);
+            request.AddParents = addParentId;
+            request.RemoveParents = removeParentId;
+            request.Fields = "id, parents";
+            request.SupportsAllDrives = true;
+
+            await request.ExecuteAsync(cancellationToken);
+        }
+
+        public async Task<string> GetWebViewLinkAsync(string fileId, CancellationToken cancellationToken = default)
+        {
+            var request = Service.Files.Get(fileId);
+            request.Fields = "webViewLink";
+            request.SupportsAllDrives = true;
+
+            var file = await request.ExecuteAsync(cancellationToken);
+            return file.WebViewLink;
+        }
+
+        static void ApplySharedDriveSupport(FilesResource.ListRequest request)
+        {
+            request.SupportsAllDrives = true;
+            request.IncludeItemsFromAllDrives = true;
+        }
+    }
+}

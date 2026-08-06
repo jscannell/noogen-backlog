@@ -1,0 +1,39 @@
+on:
+  pull_request:
+    branches:
+    - main
+  push:
+    branches:
+    - main
+
+env:
+  SOLUTION_PATH: src/Noogen.Backlog.slnx
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: dotnet restore
+      run: |
+        dotnet restore $SOLUTION_PATH
+        dotnet list $SOLUTION_PATH package --vulnerable | tee vulnerable.txt
+        if grep -Eq 'High|Moderate|Critical' vulnerable.txt; then exit 1; fi
+
+    - name: dotnet build
+      run: dotnet build --no-restore --configuration Release $SOLUTION_PATH
+
+    - name: dotnet test
+      run: dotnet test --no-build --configuration Release $SOLUTION_PATH
+
+    - name: dotnet pack
+      run: dotnet pack --no-build --configuration Release src/Noogen.Backlog.Cli/Noogen.Backlog.Cli.csproj

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Google.Apis.Auth" Version="1.75.0" />
+    <PackageReference Include="Google.Apis.Drive.v3" Version="1.75.0.4218" />
+    <PackageReference Include="Google.Apis.Sheets.v4" Version="1.75.0.4178" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,29 @@
+## .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.nupkg
+
+## IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.ncrunchsolution
+*.ncrunchsolution.user
+
+## Test / coverage
+TestResults/
+*.coverage
+coverage.*.xml
+
+## Local
+.tmp/
+secrets
+*.env
+
+## Never commit service-account keys
+*-sa.json
+*.serviceaccount.json

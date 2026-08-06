@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Noogen.Backlog.Cli</RootNamespace>
+    <AssemblyName>backlog</AssemblyName>
+
+    <!-- Shipped as a global tool so the backlog is reachable from any repo, not just this one.
+         See README: dotnet pack -c Release, then dotnet tool install -g. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>backlog</ToolCommandName>
+    <PackageId>Noogen.Backlog.Cli</PackageId>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\..\artifacts</PackageOutputPath>
+    <Description>Noogen backlog — a WSJF-prioritised Kanban work-item tracker stored in Google Drive.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Noogen.Backlog\Noogen.Backlog.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noogen.Backlog.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Noogen.Providers.GoogleWorkspace\Noogen.Providers.GoogleWorkspace.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noogen.Backlog.Tests" />
+  </ItemGroup>
+
+</Project>
