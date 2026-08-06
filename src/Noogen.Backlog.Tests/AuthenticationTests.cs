@@ -97,6 +97,70 @@ namespace Noogen.Backlog.Tests
             Assert.False(OAuthClientSettings.Resolve(Path.Combine(_directory, "absent.json")).IsConfigured);
 
         [Fact]
+        public void Names_the_mistake_when_a_web_client_was_created_instead()
+        {
+            // The single most likely wrong turn in the console, and it would otherwise surface
+            // much later as an opaque consent-screen failure.
+            var path = Path.Combine(_directory, "oauth.json");
+            File.WriteAllText(path, """
+                { "web": { "client_id": "1234.apps.googleusercontent.com", "client_secret": "GOCSPX-example" } }
+                """);
+
+            var exception = Assert.Throws<OAuthClientInvalidException>(() => OAuthClientSettings.Resolve(path));
+
+            Assert.Contains("Web application client", exception.Message);
+            Assert.Contains("Desktop app", exception.Message);
+        }
+
+        [Fact]
+        public void Names_the_mistake_when_the_json_is_malformed()
+        {
+            var path = Path.Combine(_directory, "oauth.json");
+            File.WriteAllText(path, "{ not json");
+
+            Assert.Contains("not valid JSON", Assert.Throws<OAuthClientInvalidException>(() => OAuthClientSettings.Resolve(path)).Message);
+        }
+
+        [Fact]
+        public void Names_the_mistake_when_the_shape_is_unrecognised()
+        {
+            var path = Path.Combine(_directory, "oauth.json");
+            File.WriteAllText(path, """{ "somethingElse": true }""");
+
+            Assert.Contains("installed", Assert.Throws<OAuthClientInvalidException>(() => OAuthClientSettings.Resolve(path)).Message);
+        }
+
+        [Fact]
+        public void Names_the_mistake_when_the_installed_section_is_incomplete()
+        {
+            var path = Path.Combine(_directory, "oauth.json");
+            File.WriteAllText(path, """{ "installed": { "client_id": "1234.apps.googleusercontent.com" } }""");
+
+            Assert.Contains("client_secret", Assert.Throws<OAuthClientInvalidException>(() => OAuthClientSettings.Resolve(path)).Message);
+        }
+
+        [Fact]
+        public void Environment_variables_win_over_the_file()
+        {
+            // Lets a login script or CI supply the client without touching anyone's disk.
+            var path = Path.Combine(_directory, "oauth.json");
+            File.WriteAllText(path, """{ "clientId": "from-file", "clientSecret": "from-file" }""");
+
+            Environment.SetEnvironmentVariable(OAuthClientSettings.ClientIdEnvironmentVariable, "from-env");
+            Environment.SetEnvironmentVariable(OAuthClientSettings.ClientSecretEnvironmentVariable, "from-env-secret");
+
+            try
+            {
+                Assert.Equal("from-env", OAuthClientSettings.Resolve(path).ClientId);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(OAuthClientSettings.ClientIdEnvironmentVariable, null);
+                Environment.SetEnvironmentVariable(OAuthClientSettings.ClientSecretEnvironmentVariable, null);
+            }
+        }
+
+        [Fact]
         public void The_missing_client_error_explains_the_whole_setup()
         {
             var message = new OAuthClientNotConfiguredException("C:\\x\\oauth.json").Message;

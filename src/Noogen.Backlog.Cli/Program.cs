@@ -42,6 +42,11 @@ namespace Noogen.Backlog.Cli
                 Fail(command, "oauth-client-missing", exception.Message);
                 return 3;
             }
+            catch (OAuthClientInvalidException exception)
+            {
+                Fail(command, "oauth-client-invalid", exception.Message);
+                return 3;
+            }
             catch (ArgumentException exception)
             {
                 Fail(command, "invalid-argument", exception.Message);

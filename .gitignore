@@ -27,3 +27,8 @@ secrets
 ## Never commit service-account keys
 *-sa.json
 *.serviceaccount.json
+
+## OAuth client. Not confidential by Google's own definition for installed apps, but GitHub
+## secret scanning flags the GOCSPX- prefix and would alert on every push.
+oauth.json
+client_secret*.json

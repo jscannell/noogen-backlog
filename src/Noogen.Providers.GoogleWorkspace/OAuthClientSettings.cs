@@ -67,22 +67,80 @@ namespace Noogen.Providers.GoogleWorkspace
 
         static OAuthClientSettings? ReadFile(string filePath)
         {
-            var json = File.ReadAllText(filePath);
+            JsonDocument document;
 
-            // Accepts either our flat shape or the client_secret_*.json Google hands you, so the
-            // downloaded file can be dropped in unedited.
-            using var document = JsonDocument.Parse(json);
-
-            if (document.RootElement.TryGetProperty("installed", out var installed))
+            try
             {
-                return new OAuthClientSettings
-                {
-                    ClientId = installed.TryGetProperty("client_id", out var id) ? id.GetString() : null,
-                    ClientSecret = installed.TryGetProperty("client_secret", out var secret) ? secret.GetString() : null
-                };
+                document = JsonDocument.Parse(File.ReadAllText(filePath));
+            }
+            catch (JsonException exception)
+            {
+                throw new OAuthClientInvalidException(filePath, $"the file is not valid JSON ({exception.Message})");
             }
 
-            return JsonSerializer.Deserialize<OAuthClientSettings>(json);
+            using (document)
+            {
+                // A "web" root means an OAuth client of the wrong type. It cannot drive the
+                // loopback flow an installed app uses, and the resulting failure would otherwise
+                // surface as a confusing consent-screen error much later.
+                if (document.RootElement.TryGetProperty("web", out _))
+                {
+                    throw new OAuthClientInvalidException(
+                        filePath,
+                        "this is a Web application client. Create a new OAuth client ID with " +
+                        "Application type: Desktop app, and download that one instead");
+                }
+
+                // The client_secret_*.json Google hands you, unedited.
+                if (document.RootElement.TryGetProperty("installed", out var installed))
+                {
+                    var settings = new OAuthClientSettings
+                    {
+                        ClientId = ReadString(installed, "client_id"),
+                        ClientSecret = ReadString(installed, "client_secret")
+                    };
+
+                    if (!settings.IsConfigured)
+                        throw new OAuthClientInvalidException(filePath, "the 'installed' section has no client_id or client_secret");
+
+                    return settings;
+                }
+
+                // Or our flat shape, for anyone who would rather write two lines than keep the
+                // whole download.
+                var flat = new OAuthClientSettings
+                {
+                    ClientId = ReadString(document.RootElement, "clientId") ?? ReadString(document.RootElement, "client_id"),
+                    ClientSecret = ReadString(document.RootElement, "clientSecret") ?? ReadString(document.RootElement, "client_secret")
+                };
+
+                if (!flat.IsConfigured)
+                {
+                    throw new OAuthClientInvalidException(
+                        filePath,
+                        "expected either the client_secret JSON downloaded from the Cloud console " +
+                        "(with an 'installed' section) or {\"clientId\": \"...\", \"clientSecret\": \"...\"}");
+                }
+
+                return flat;
+            }
+        }
+
+        static string? ReadString(JsonElement element, string property) =>
+            element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+    }
+
+    /// <summary>
+    /// The file exists but cannot be used. Distinct from "not configured" so the message can name
+    /// the actual problem instead of repeating the whole setup guide.
+    /// </summary>
+    public class OAuthClientInvalidException : InvalidOperationException
+    {
+        public OAuthClientInvalidException(string filePath, string problem)
+            : base($"The OAuth client file at {filePath} cannot be used: {problem}.")
+        {
         }
     }
 

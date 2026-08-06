@@ -121,18 +121,70 @@ revoke org-wide under Security → API Controls → App Access Control.
 the app itself created — a second person could not read the index or tickets your install created.
 That breadth is the reason token protection matters, and worth weighing before rollout.
 
-### One-time OAuth client (once per organisation)
+### The OAuth client (`oauth.json`)
 
-1. Cloud console → APIs & Services → **Credentials** → Create Credentials → **OAuth client ID**
-2. Application type: **Desktop app**
-3. Consent screen → User Type: **Internal** — internal apps skip Google's verification review,
-   which matters because `drive` is a restricted scope
-4. Download the JSON to `%APPDATA%\Noogen\oauth.json` (the file Google gives you works unedited),
-   or set `NOOGEN_BACKLOG_OAUTH_CLIENT_ID` / `NOOGEN_BACKLOG_OAUTH_CLIENT_SECRET`
+**What it is.** The credential that identifies *this CLI* to Google — not any person, and not any
+grant of access. It tells Google's consent screen which application is asking. Everyone in the
+organisation uses the same one; individual identity comes from `backlog login`.
 
-The client secret is not confidential here, and Google says so: for installed apps it cannot be
-kept secret, and security rests on the user's own consent plus the loopback redirect. The real
-access boundary is each person's Google account and their shared-drive membership.
+**Created once, by one person, for everyone.**
+
+1. Cloud console → **APIs & Services → OAuth consent screen**
+   - User Type: **Internal**. This is the important choice: internal apps are limited to your
+     Workspace domain and skip Google's verification review entirely. `drive` is a *restricted*
+     scope, so an External app would face a lengthy security assessment before anyone could use it.
+   - Add the scopes `drive`, `spreadsheets`, `openid`, `email`.
+2. → **Credentials → Create Credentials → OAuth client ID**
+   - Application type: **Desktop app**. Not "Web application" — a web client cannot drive the
+     loopback redirect an installed app uses. (If you pick wrong, `backlog login` says so by name.)
+3. **Download JSON** and save it to `%APPDATA%\Noogen\oauth.json` — unedited, exactly as Google
+   gives it to you. On macOS and Linux that path is `~/.config/Noogen/oauth.json`.
+4. Use the **same GCP project** that has the Drive API and Sheets API enabled.
+
+**What the file looks like.** Google's download:
+
+```json
+{
+  "installed": {
+    "client_id": "123456789012-abc...xyz.apps.googleusercontent.com",
+    "project_id": "astral-net-346914",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_secret": "GOCSPX-...",
+    "redirect_uris": ["http://localhost"]
+  }
+}
+```
+
+Only `installed.client_id` and `installed.client_secret` are read; the rest is ignored. A minimal
+hand-written alternative also works:
+
+```json
+{ "clientId": "123...apps.googleusercontent.com", "clientSecret": "GOCSPX-..." }
+```
+
+**Distributing it to the team.** Three options, in order of preference:
+
+| how | good for |
+|---|---|
+| Share the file via 1Password / internal vault; each person saves it to the path above | most teams |
+| Set `NOOGEN_BACKLOG_OAUTH_CLIENT_ID` and `NOOGEN_BACKLOG_OAUTH_CLIENT_SECRET` from a login script or MDM | managed fleets; env wins over the file |
+| Bake into an internal build via `OAuthClientSettings.CompiledInClientId` | a private nupkg feed |
+
+⚠️ **Don't commit it to a repo.** Not because it is dangerous — see below — but because GitHub's
+secret scanning detects the `GOCSPX-` prefix and will raise alerts every time. The `.gitignore`
+already excludes it.
+
+**Is the client secret actually secret?** No, and Google says so explicitly: for installed
+applications the client secret cannot be kept confidential, because it ships to every user's
+machine. Security rests on the user's own consent plus the loopback redirect, and the real access
+boundary is each person's Google account and their shared-drive membership. Someone holding this
+file can present a consent screen that says "Noogen backlog" — they cannot read your Drive.
+Treat it as low-sensitivity configuration, not as a credential.
+
+**When something is wrong**, `backlog login` names the specific problem rather than repeating the
+setup guide — wrong client type, malformed JSON, missing `client_secret`, or unrecognised shape.
 
 ## One-time Google setup
 
