@@ -86,8 +86,12 @@ items already in the queue.
 Never invent scores silently. If asked to file a ticket without enough information to score it,
 create it unscored (it will sort last) and say it needs scoring.
 
-## Setup
+## Setup and authentication
 
-If a command reports no backlog is configured, the person needs to run
-`backlog init --drive <sharedDriveId>` once. See the repo README for the service-account setup;
-do not attempt to create credentials yourself.
+Each person signs in as themselves with `backlog login`, which opens a browser once. If a command
+fails with `not-signed-in`, tell them to run it — do not attempt to authenticate on their behalf,
+and never read, copy, print, or move anything under the credentials directory.
+
+If a command reports no backlog is configured, someone needs to run
+`backlog init --drive <sharedDriveId> --timezone <IANA>` once. See the repo README for the
+one-time OAuth client setup; do not attempt to create credentials yourself.

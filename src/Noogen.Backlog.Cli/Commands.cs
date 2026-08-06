@@ -11,7 +11,7 @@ namespace Noogen.Backlog.Cli
             _config = config;
         }
 
-        IBacklogStore Store() => Program.CreateStore(_config);
+        Task<IBacklogStore> StoreAsync() => Program.CreateStoreAsync(_config);
 
         static DateTimeOffset Now => DateTimeOffset.UtcNow;
 
@@ -32,6 +32,141 @@ namespace Noogen.Backlog.Cli
         static string When(DateTimeOffset? instant, TimeZoneInfo zone) =>
             instant.HasValue && instant.Value != default ? SheetTime.FormatWithZone(instant.Value, zone) : "-";
 
+        // --- account ---
+
+        public async Task<int> LoginAsync(CommandLine command)
+        {
+            var store = Program.CreateCredentialStore();
+            var account = _config.ResolveAccount(command.Option("account"));
+
+            // Fail before promising a browser we cannot open.
+            if (!OAuthClientSettings.Resolve(LocalConfig.OAuthClientPath).IsConfigured)
+                throw new OAuthClientNotConfiguredException(LocalConfig.OAuthClientPath);
+
+            Output.WriteError("Opening your browser to sign in with Google...");
+
+            var credential = await store.AuthorizeAsync(account, GoogleWorkspaceScopes.All);
+            var email = await UserCredentialStore.GetEmailAsync(credential);
+
+            // Re-key the cached token to the real address, so a machine can hold several accounts
+            // without them colliding on "default". A rename, not a second authorisation — the
+            // browser opens once.
+            if (!string.IsNullOrEmpty(email) && account == UserCredentialStore.DefaultAccountKey)
+            {
+                await store.RenameAsync(account, email, GoogleWorkspaceScopes.All);
+                account = email;
+            }
+
+            _config.Account = account;
+            _config.DefaultOwner ??= email;
+            _config.Save();
+
+            if (command.Json)
+            {
+                Output.WriteJson(new Dictionary<string, object?>
+                {
+                    ["account"] = account,
+                    ["email"] = email,
+                    ["tokenProtection"] = store.Protector.Description,
+                    ["osBacked"] = store.Protector.IsOsBacked
+                });
+                return 0;
+            }
+
+            Output.WriteLine($"Signed in as {email ?? account}.");
+            Output.WriteLine($"  refresh token protected by: {store.Protector.Description}");
+
+            WarnIfUnprotected(store);
+            return 0;
+        }
+
+        public async Task<int> LogoutAsync(CommandLine command)
+        {
+            var store = Program.CreateCredentialStore();
+            var account = _config.ResolveAccount(command.Option("account"));
+
+            var removed = await store.RevokeAsync(account, GoogleWorkspaceScopes.All);
+
+            if (string.Equals(_config.Account, account, StringComparison.OrdinalIgnoreCase))
+            {
+                _config.Account = null;
+                _config.Save();
+            }
+
+            if (command.Json)
+            {
+                Output.WriteJson(new Dictionary<string, object> { ["account"] = account, ["removed"] = removed });
+                return 0;
+            }
+
+            Output.WriteLine(removed
+                ? $"Signed out {account}. The token was revoked with Google and deleted locally."
+                : $"No stored credential for {account}.");
+            return 0;
+        }
+
+        public async Task<int> WhoAmIAsync(CommandLine command)
+        {
+            var store = Program.CreateCredentialStore();
+            var account = _config.ResolveAccount(null);
+
+            // whoami must answer even when the answer is "nothing is set up" — that is exactly
+            // when someone runs it.
+            ResolvedCredential? resolved = null;
+            string? problem = null;
+
+            try
+            {
+                resolved = await Program.ResolveCredentialAsync(_config);
+            }
+            catch (Exception exception)
+            {
+                problem = exception.Message;
+            }
+
+            if (command.Json)
+            {
+                Output.WriteJson(new Dictionary<string, object?>
+                {
+                    ["account"] = account,
+                    ["source"] = resolved?.Source.ToString() ?? "None",
+                    ["description"] = resolved?.Description,
+                    ["problem"] = problem,
+                    ["tokenProtection"] = store.Protector.Description,
+                    ["osBacked"] = store.Protector.IsOsBacked,
+                    ["accounts"] = store.ListAccounts()
+                });
+                return resolved is null ? 3 : 0;
+            }
+
+            Output.WriteLine($"account        {account}");
+            Output.WriteLine($"authenticated  {resolved?.Description ?? "not authenticated"}");
+            Output.WriteLine($"token store    {store.TokenDirectory}");
+            Output.WriteLine($"protected by   {store.Protector.Description}");
+
+            if (problem is not null)
+                Output.WriteLine($"problem        {problem}");
+
+            var accounts = store.ListAccounts();
+            if (accounts.Count > 1)
+                Output.WriteLine($"signed in      {string.Join(", ", accounts)}");
+
+            WarnIfUnprotected(store);
+            return resolved is null ? 3 : 0;
+        }
+
+        static void WarnIfUnprotected(UserCredentialStore store)
+        {
+            if (store.Protector.IsOsBacked)
+                return;
+
+            Output.WriteError(
+                "\nWARNING: no OS keystore is available here, so the refresh token is stored unencrypted.\n" +
+                "A copy of that file grants access to your Drive from anywhere until it is revoked.\n" +
+                "On a headless machine, prefer a service account: set " +
+                $"{LocalConfig.ServiceAccountKeyEnvironmentVariable} to a key file instead of signing in.");
+        }
+
         // --- setup ---
 
         public async Task<int> InitAsync(CommandLine command)
@@ -43,9 +178,11 @@ namespace Noogen.Backlog.Cli
             // --timezone is passed explicitly.
             var timeZoneId = command.Option("timezone") ?? (_config.SpreadsheetId is null ? SheetTime.LocalIanaId() : null);
 
+            var credential = await Program.ResolveCredentialAsync(_config);
+
             var initializer = new BacklogInitializer(
-                new DriveGateway(new DriveClientFactory()),
-                new SheetsGateway(new SheetsClientFactory()));
+                new DriveGateway(new DriveClientFactory(credential.Initializer)),
+                new SheetsGateway(new SheetsClientFactory(credential.Initializer)));
 
             var result = await initializer.RunAsync(driveId, _config.SpreadsheetId, timeZoneId);
 
@@ -72,7 +209,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ListAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var tickets = await store.ListAsync(BuildFilter(command));
 
             if (command.Json)
@@ -99,7 +236,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> NextAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var filter = BuildFilter(command);
             filter.Top ??= 1;
 
@@ -125,7 +262,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> WipAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var now = Now;
 
             var tickets = await store.WipAsync(BuildFilter(command));
@@ -175,7 +312,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> FlowAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var since = command.SinceOption("since", Now);
             var flow = await store.FlowAsync(since);
 
@@ -197,7 +334,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ShowAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
             var ticket = await store.GetAsync(id) ?? throw new KeyNotFoundException($"No ticket '{id}'.");
@@ -239,7 +376,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> NewAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
 
             var request = new NewTicket
             {
@@ -257,7 +394,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> EditAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
             if (command.Has("status") || command.Has("phase"))
@@ -281,7 +418,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ScoreAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
             var score = ReadScore(command);
 
@@ -297,7 +434,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> NoteAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
             var ticket = await store.AppendNoteAsync(id, command.RequireOption("text"));
@@ -308,7 +445,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> StartAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
             var owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : _config.ResolveOwner("me");
 
@@ -318,7 +455,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> BlockAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
             var ticket = await store.SetStateAsync(id, WorkState.Blocked, command.RequireOption("reason"));
@@ -327,7 +464,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> SetStateAsync(CommandLine command, WorkState state)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
             var ticket = await store.SetStateAsync(id, state, null);
@@ -336,7 +473,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ArchiveAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
             var outcome = Vocabulary.Parse<Outcome>(command.Option("as") ?? "done", "outcome");
 
@@ -347,7 +484,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> RestoreAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
             var ticket = await store.RestoreAsync(id);
@@ -358,7 +495,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ReindexAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var repaired = await store.ReindexAsync();
 
             if (command.Json)
@@ -373,7 +510,7 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> DoctorAsync(CommandLine command)
         {
-            var store = Store();
+            var store = await StoreAsync();
             var report = await store.DoctorAsync();
 
             if (command.Json)

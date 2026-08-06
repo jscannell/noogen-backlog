@@ -69,26 +69,88 @@ backlog help
 Installing globally is deliberate — the backlog spans repos, so the tool should not live inside
 any one of them.
 
+## Authentication
+
+Each person signs in as themselves:
+
+```bash
+backlog login          # opens a browser, once
+backlog whoami         # who you are and how you authenticated
+backlog logout         # revokes with Google and deletes the local token
+```
+
+No gcloud, no shared credentials, no service-account key on anyone's laptop. Drive revision
+history attributes edits to the actual human, and access is governed by their existing membership
+of the shared drive rather than granted centrally.
+
+Credentials resolve in this order, reflecting who each source is for:
+
+| order | source | for |
+|---|---|---|
+| 1 | `NOOGEN_BACKLOG_CREDENTIALS` — service-account key path | CI, automation, headless |
+| 2 | signed-in user (`backlog login`) | a person at a keyboard |
+| 3 | Application Default Credentials | Workload Identity in GKE, for the platform agent |
+
+ADC is last and never volunteered. On a workstation it is machine-global and usually belongs to
+something else — running `gcloud auth application-default login --scopes=…drive` would clobber the
+credentials you already use for Vertex and Cloud SQL. This tool never asks you to do that.
+
+### Token security
+
+The refresh token is encrypted at rest by the OS keystore — **DPAPI** on Windows, **Keychain** on
+macOS, **Secret Service** on Linux. `backlog whoami` reports which is in use, and warns loudly if
+none is available rather than quietly writing plaintext.
+
+**The threat this addresses.** A Drive-scoped refresh token is a high-value target, and the
+dominant real-world attack is commodity infostealer malware sweeping known credential paths and
+exfiltrating the files for offline use. A copied file is useless here: the key material never
+leaves the OS keystore and is bound to that user on that device.
+
+**What it does not address, stated plainly.** Malware already running as you, on your machine,
+while the keystore is unlocked, can ask the OS to decrypt exactly as we do. No user-space scheme
+prevents that — a process with your privileges can do what you can do. The honest claim is that
+this raises the cost from "copy a file" to "write target-specific code and run it on the victim's
+machine", and eliminates offline reuse. Anything storing a key beside the ciphertext would be
+theatre; this does not.
+
+**If a machine is compromised**, run `backlog logout` (revokes server-side), or revoke at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions). A Workspace admin can
+revoke org-wide under Security → API Controls → App Access Control.
+
+**Scope.** The CLI requests full `drive` because the narrower `drive.file` scope only covers files
+the app itself created — a second person could not read the index or tickets your install created.
+That breadth is the reason token protection matters, and worth weighing before rollout.
+
+### One-time OAuth client (once per organisation)
+
+1. Cloud console → APIs & Services → **Credentials** → Create Credentials → **OAuth client ID**
+2. Application type: **Desktop app**
+3. Consent screen → User Type: **Internal** — internal apps skip Google's verification review,
+   which matters because `drive` is a restricted scope
+4. Download the JSON to `%APPDATA%\Noogen\oauth.json` (the file Google gives you works unedited),
+   or set `NOOGEN_BACKLOG_OAUTH_CLIENT_ID` / `NOOGEN_BACKLOG_OAUTH_CLIENT_SECRET`
+
+The client secret is not confidential here, and Google says so: for installed apps it cannot be
+kept secret, and security rests on the user's own consent plus the loopback redirect. The real
+access boundary is each person's Google account and their shared-drive membership.
+
 ## One-time Google setup
 
 1. Enable the **Drive API** and **Sheets API** on the GCP project.
-2. Create a service account, e.g. `noogen-backlog@<project>.iam.gserviceaccount.com`.
-   **No project IAM roles are needed.**
-3. Add that service-account email as a **Content manager** on the shared drive. Shared drives
-   accept a service account as a direct member, so no domain-wide delegation is involved.
-4. Point `GOOGLE_APPLICATION_CREDENTIALS` at its JSON key.
+2. Create the OAuth client described above — once, for the whole organisation.
+3. Make sure everyone who needs the backlog is a member of the shared drive. That, not any grant
+   inside this tool, is what controls access.
+4. Each person runs `backlog login`.
 5. `backlog init --drive <sharedDriveId> [--timezone America/New_York]` — creates the folders,
    the index, the tabs, the formulas, and the Config tab, and stamps the timezone onto the
    spreadsheet. It is idempotent, so re-running repairs a half-finished setup. The timezone
    defaults to this machine's on first run.
 
-> If step 4 is blocked by the `constraints/iam.disableServiceAccountKeyCreation` org policy, use
-> your own credentials instead — no code change is needed, because auth resolves through the ADC
-> chain:
-> ```bash
-> gcloud auth application-default login \
->   --scopes=openid,email,https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/spreadsheets
-> ```
+Note there is no service-account key to create or distribute, so the
+`constraints/iam.disableServiceAccountKeyCreation` org policy is not in the way. If you *do* want
+a key for CI, add the service account as a **Content manager** on the shared drive — shared drives
+accept one as a direct member, so no domain-wide delegation is involved — and point
+`NOOGEN_BACKLOG_CREDENTIALS` at the key file.
 
 Local config lives at `%APPDATA%\Noogen\backlog.json` and holds only the spreadsheet id.
 Everything else — WIP limit, id prefix, folder ids, vocabularies — lives on the Sheet's **Config**

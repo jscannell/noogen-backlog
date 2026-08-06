@@ -12,11 +12,10 @@ setup, and command surface.
 Flow: **CLI verb → `IBacklogStore` → `SheetIndex` / `TicketMover` → gateways → Drive + Sheets.**
 Solution: `src/Noogen.Backlog.slnx`.
 
-- **`Noogen.Providers.GoogleWorkspace`** — `DriveClientFactory` / `SheetsClientFactory` resolving
-  credentials through the **ADC chain**, plus `IDriveGateway` / `ISheetsGateway` and their
-  Google-backed implementations. The gateway interfaces are the test seam — everything above them
-  runs against in-memory fakes. `A1` is the only place that builds range strings.
-  No domain-wide delegation: shared drives take a service account as a direct member.
+- **`Noogen.Providers.GoogleWorkspace`** — `GoogleCredentialResolver`, `UserCredentialStore`, the
+  `Security/` token protection, and the Drive/Sheets gateways. The gateway interfaces are the test
+  seam — everything above them runs against in-memory fakes. `A1` is the only place that builds
+  range strings. No domain-wide delegation: shared drives take a service account as a direct member.
 - **`Noogen.Backlog`** — all logic. Referenced directly by the future `BacklogToolset` in
   `Noogen.Agent`, which is why nothing here may depend on the CLI.
 - **`Noogen.Backlog.Cli`** — thin shell. Arg parsing, output formatting, exit codes. No logic.
@@ -78,6 +77,20 @@ These are the things to be careful about; most of the design follows from them.
 12. **`--json` is always UTC.** Human output localises; the machine contract does not. The skill
     and the future agent toolset parse that output, so a representation that moves with a config
     setting would be a trap.
+
+13. **The refresh token is never written in the clear.** `ProtectedDataStore` replaces Google's
+    `FileDataStore` and encrypts through the OS keystore — DPAPI, Keychain, or Secret Service.
+    Where no keystore exists the fallback stores plaintext and *says so*, and the CLI warns;
+    silently writing plaintext while looking encrypted would be the worst outcome. Never
+    reintroduce `FileDataStore`, and never store a key beside the ciphertext — that is theatre.
+    Be honest in messaging about the limit: this defeats file harvesting and offline reuse, not
+    malware already running as the user.
+
+14. **Credential precedence is `NOOGEN_BACKLOG_CREDENTIALS` → signed-in user → ADC**, and ADC is
+    never volunteered on a workstation, where it is machine-global and usually belongs to
+    something else. `GoogleCredentialResolver.Choose` isolates the decision so it stays testable.
+    Credentials resolve once at startup — never lazily from inside a request, because resolution
+    can need I/O and, for a new user, a browser.
 
 ## Conventions
 

@@ -32,6 +32,16 @@ namespace Noogen.Backlog.Cli
                 Fail(command, "not-found", exception.Message);
                 return 1;
             }
+            catch (NotSignedInException exception)
+            {
+                Fail(command, "not-signed-in", exception.Message);
+                return 3;
+            }
+            catch (OAuthClientNotConfiguredException exception)
+            {
+                Fail(command, "oauth-client-missing", exception.Message);
+                return 3;
+            }
             catch (ArgumentException exception)
             {
                 Fail(command, "invalid-argument", exception.Message);
@@ -62,6 +72,12 @@ namespace Noogen.Backlog.Cli
 
             switch (command.Verb)
             {
+                case "login":
+                    return await commands.LoginAsync(command);
+                case "logout":
+                    return await commands.LogoutAsync(command);
+                case "whoami":
+                    return await commands.WhoAmIAsync(command);
                 case "init":
                     return await commands.InitAsync(command);
                 case "list":
@@ -103,11 +119,24 @@ namespace Noogen.Backlog.Cli
             }
         }
 
-        internal static IBacklogStore CreateStore(LocalConfig config) =>
-            new BacklogStore(
-                new SheetsGateway(new SheetsClientFactory()),
-                new DriveGateway(new DriveClientFactory()),
+        internal static UserCredentialStore CreateCredentialStore() =>
+            new(OAuthClientSettings.Resolve(LocalConfig.OAuthClientPath), LocalConfig.TokenDirectory);
+
+        internal static async Task<ResolvedCredential> ResolveCredentialAsync(LocalConfig config, string? account = null)
+        {
+            var resolver = new GoogleCredentialResolver(CreateCredentialStore(), LocalConfig.ServiceAccountKeyPath);
+            return await resolver.ResolveAsync(config.ResolveAccount(account), GoogleWorkspaceScopes.All);
+        }
+
+        internal static async Task<IBacklogStore> CreateStoreAsync(LocalConfig config)
+        {
+            var credential = await ResolveCredentialAsync(config);
+
+            return new BacklogStore(
+                new SheetsGateway(new SheetsClientFactory(credential.Initializer)),
+                new DriveGateway(new DriveClientFactory(credential.Initializer)),
                 config.RequireSpreadsheetId());
+        }
 
         static void Fail(CommandLine command, string kind, string message)
         {
@@ -157,6 +186,11 @@ namespace Noogen.Backlog.Cli
                 FINISHING
                   archive <id> --as done|cancelled|duplicate [--note "..."]
                   restore <id>                            Archive -> Backlog
+
+                ACCOUNT
+                  login [--account name]                  Sign in with your own Google account
+                  logout [--account name]                 Revoke and delete the local token
+                  whoami                                  Who you are and how you authenticated
 
                 MAINTENANCE
                   init --drive <id> [--timezone America/New_York]   One-time setup (idempotent)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Noogen.Providers.GoogleWorkspace;
 
 namespace Noogen.Backlog.Cli
 {
@@ -23,20 +24,47 @@ namespace Noogen.Backlog.Cli
         [JsonPropertyName("defaultOwner")]
         public string? DefaultOwner { get; set; }
 
+        /// <summary>Which signed-in account to use. Set by `backlog login`.</summary>
+        [JsonPropertyName("account")]
+        public string? Account { get; set; }
+
         static readonly JsonSerializerOptions SerializerOptions = new()
         {
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
 
-        public static string Path
+        public const string ServiceAccountKeyEnvironmentVariable = "NOOGEN_BACKLOG_CREDENTIALS";
+
+        public static string Directory
         {
             get
             {
                 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                return System.IO.Path.Combine(appData, "Noogen", "backlog.json");
+                return System.IO.Path.Combine(appData, "Noogen");
             }
         }
+
+        public static string Path => System.IO.Path.Combine(Directory, "backlog.json");
+
+        /// <summary>Where the OAuth client JSON downloaded from the Cloud console can be dropped.</summary>
+        public static string OAuthClientPath => System.IO.Path.Combine(Directory, "oauth.json");
+
+        /// <summary>Encrypted refresh tokens, one file per signed-in account.</summary>
+        public static string TokenDirectory => System.IO.Path.Combine(Directory, "credentials");
+
+        /// <summary>
+        /// An explicit service-account key, for CI and automation. Never auto-discovered from
+        /// GOOGLE_APPLICATION_CREDENTIALS: that variable usually belongs to something else on a
+        /// developer's machine, and quietly acting as a different identity would be a surprise.
+        /// </summary>
+        public static string? ServiceAccountKeyPath =>
+            Environment.GetEnvironmentVariable(ServiceAccountKeyEnvironmentVariable);
+
+        public string ResolveAccount(string? requested) =>
+            !string.IsNullOrWhiteSpace(requested) ? requested.Trim()
+            : !string.IsNullOrWhiteSpace(Account) ? Account
+            : UserCredentialStore.DefaultAccountKey;
 
         public static LocalConfig Load()
         {
@@ -53,10 +81,7 @@ namespace Noogen.Backlog.Cli
 
         public void Save()
         {
-            var directory = System.IO.Path.GetDirectoryName(Path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
+            System.IO.Directory.CreateDirectory(Directory);
             File.WriteAllText(Path, JsonSerializer.Serialize(this, SerializerOptions));
         }
 
