@@ -140,6 +140,60 @@ namespace Noogen.Providers.GoogleWorkspace
             _tabIdCache.Remove(CacheKey(spreadsheetId, tabName));
         }
 
+        public async Task RenameTabAsync(string spreadsheetId, string tabName, string newTabName, CancellationToken cancellationToken = default)
+        {
+            var tabId = await GetTabIdAsync(spreadsheetId, tabName, cancellationToken);
+
+            var request = new Request
+            {
+                UpdateSheetProperties = new UpdateSheetPropertiesRequest
+                {
+                    Properties = new SheetProperties { SheetId = tabId, Title = newTabName },
+                    Fields = "title"
+                }
+            };
+
+            await BatchUpdateAsync(spreadsheetId, [request], cancellationToken);
+
+            // The id outlives the rename; only the name it is cached under changes.
+            _tabIdCache.Remove(CacheKey(spreadsheetId, tabName));
+            _tabIdCache[CacheKey(spreadsheetId, newTabName)] = tabId;
+        }
+
+        public async Task SetTabOrderAsync(string spreadsheetId, IReadOnlyList<string> tabNames, CancellationToken cancellationToken = default)
+        {
+            var spreadsheet = await LoadSpreadsheetAsync(spreadsheetId, cancellationToken);
+
+            // Sheets reads a requested index against the order *before* that request, so a tab
+            // moving right needs index + 1. Placing them front to back never moves one right:
+            // after the nth request the first n tabs are already settled, so the tab we move next
+            // is at or behind its target and a plain index is correct. Requests in one batch
+            // apply in order, which is what makes that hold.
+            var requests = new List<Request>();
+            var position = 0;
+
+            foreach (var tabName in tabNames)
+            {
+                var match = spreadsheet.Sheets.FirstOrDefault(sheet => sheet.Properties.Title == tabName);
+                if (match is null)
+                    continue;
+
+                requests.Add(new Request
+                {
+                    UpdateSheetProperties = new UpdateSheetPropertiesRequest
+                    {
+                        Properties = new SheetProperties { SheetId = match.Properties.SheetId, Index = position },
+                        Fields = "index"
+                    }
+                });
+
+                position++;
+            }
+
+            if (requests.Count > 0)
+                await BatchUpdateAsync(spreadsheetId, requests, cancellationToken);
+        }
+
         public async Task FreezeHeaderAsync(string spreadsheetId, string tabName, CancellationToken cancellationToken = default)
         {
             var tabId = await GetTabIdAsync(spreadsheetId, tabName, cancellationToken);
@@ -183,33 +237,44 @@ namespace Noogen.Providers.GoogleWorkspace
             await BatchUpdateAsync(spreadsheetId, [request], cancellationToken);
         }
 
-        public async Task SetColumnDateTimeFormatAsync(string spreadsheetId, string tabName, int columnIndex, string pattern, CancellationToken cancellationToken = default)
+        public async Task SetDateTimeFormatAsync(string spreadsheetId, string tabName, IReadOnlyList<int> columnIndexes, int startRowIndex, int? endRowIndex, string pattern, CancellationToken cancellationToken = default)
         {
+            if (columnIndexes.Count == 0)
+                return;
+
             var tabId = await GetTabIdAsync(spreadsheetId, tabName, cancellationToken);
+            var requests = new List<Request>();
 
-            var request = new Request
+            foreach (var columnIndex in columnIndexes)
             {
-                RepeatCell = new RepeatCellRequest
+                requests.Add(new Request
                 {
-                    Range = new GridRange
+                    RepeatCell = new RepeatCellRequest
                     {
-                        SheetId = tabId,
-                        StartColumnIndex = columnIndex,
-                        EndColumnIndex = columnIndex + 1,
-                        StartRowIndex = 1
-                    },
-                    Cell = new CellData
-                    {
-                        UserEnteredFormat = new CellFormat
+                        Range = new GridRange
                         {
-                            NumberFormat = new NumberFormat { Type = "DATE_TIME", Pattern = pattern }
-                        }
-                    },
-                    Fields = "userEnteredFormat.numberFormat"
-                }
-            };
+                            SheetId = tabId,
+                            StartColumnIndex = columnIndex,
+                            EndColumnIndex = columnIndex + 1,
+                            StartRowIndex = startRowIndex,
 
-            await BatchUpdateAsync(spreadsheetId, [request], cancellationToken);
+                            // Left unset for an unbounded range, which is how a column-wide format
+                            // reaches rows that do not exist yet.
+                            EndRowIndex = endRowIndex
+                        },
+                        Cell = new CellData
+                        {
+                            UserEnteredFormat = new CellFormat
+                            {
+                                NumberFormat = new NumberFormat { Type = "DATE_TIME", Pattern = pattern }
+                            }
+                        },
+                        Fields = "userEnteredFormat.numberFormat"
+                    }
+                });
+            }
+
+            await BatchUpdateAsync(spreadsheetId, requests, cancellationToken);
         }
 
         public async Task<string?> GetSpreadsheetTimeZoneAsync(string spreadsheetId, CancellationToken cancellationToken = default)

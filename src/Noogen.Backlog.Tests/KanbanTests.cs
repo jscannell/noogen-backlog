@@ -3,7 +3,7 @@ namespace Noogen.Backlog.Tests
     public class WipLimitTests
     {
         [Fact]
-        public async Task Refuses_to_start_past_the_limit_and_names_what_is_in_flight()
+        public async Task StartAsync_WipLimitAlreadyReached_ThrowsNamingWhatIsInFlight()
         {
             var backlog = await TestBacklog.CreateAsync(wipLimit: 1);
 
@@ -25,7 +25,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Force_overrides_the_limit_and_records_that_it_did()
+        public async Task StartAsync_ForcedPastTheWipLimit_StartsAnywayAndRecordsThatItWasForced()
         {
             var backlog = await TestBacklog.CreateAsync(wipLimit: 1);
 
@@ -42,7 +42,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Starting_up_to_the_limit_is_fine()
+        public async Task StartAsync_StartingUpToTheWipLimit_IsAllowed()
         {
             var backlog = await TestBacklog.CreateAsync(wipLimit: 2);
 
@@ -56,7 +56,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Finishing_something_frees_a_slot()
+        public async Task StartAsync_EarlierWorkWasArchived_ReusesTheFreedSlot()
         {
             var backlog = await TestBacklog.CreateAsync(wipLimit: 1);
 
@@ -84,7 +84,7 @@ namespace Noogen.Backlog.Tests
         };
 
         [Fact]
-        public void An_empty_archive_reports_zero_throughput_and_null_percentiles()
+        public void From_ArchiveIsEmpty_ReportsZeroThroughputAndNoPercentiles()
         {
             var metrics = FlowMetrics.From([], null);
 
@@ -94,7 +94,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void A_three_item_sample_does_not_throw()
+        public void From_ThreeArchivedItems_ReportsThroughputAndPercentiles()
         {
             var now = DateTimeOffset.UtcNow;
             var metrics = FlowMetrics.From(
@@ -107,7 +107,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void A_single_item_reports_itself_for_every_percentile()
+        public void From_ASingleArchivedItem_ReportsThatItemForEveryPercentile()
         {
             var metrics = FlowMetrics.From([Archived(4, 9, DateTimeOffset.UtcNow)], null);
 
@@ -117,7 +117,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Only_completed_work_counts_toward_throughput()
+        public void From_SomeItemsWereCancelledOrDuplicate_CountsOnlyCompletedWork()
         {
             var now = DateTimeOffset.UtcNow;
             var metrics = FlowMetrics.From(
@@ -132,7 +132,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Honours_the_since_window()
+        public void From_SinceWindowGiven_IgnoresAnythingArchivedBeforeIt()
         {
             var now = new DateTimeOffset(2026, 8, 6, 0, 0, 0, TimeSpan.Zero);
             var metrics = FlowMetrics.From(
@@ -150,15 +150,15 @@ namespace Noogen.Backlog.Tests
         [InlineData(0.5, 3)]
         [InlineData(0.85, 5)]
         [InlineData(1.0, 5)]
-        public void Uses_nearest_rank(double percentile, double expected) =>
+        public void Percentile_SampleOfFive_UsesNearestRank(double percentile, double expected) =>
             Assert.Equal(expected, FlowMetrics.Percentile([1, 2, 3, 4, 5], percentile));
 
         [Fact]
-        public void Percentile_of_an_empty_sample_is_null() =>
+        public void Percentile_SampleIsEmpty_IsNull() =>
             Assert.Null(FlowMetrics.Percentile([], 0.5));
 
         [Fact]
-        public async Task Flow_reads_the_frozen_numbers_off_the_archive_tab()
+        public async Task FlowAsync_WorkHasBeenArchived_ReadsTheFrozenNumbersOffTheArchiveTab()
         {
             var backlog = await TestBacklog.CreateAsync();
 
@@ -177,7 +177,7 @@ namespace Noogen.Backlog.Tests
     public class AgingTests
     {
         [Fact]
-        public async Task Wip_is_ordered_oldest_first_so_stuck_work_surfaces()
+        public async Task WipAsync_SeveralItemsInFlight_OrdersOldestFirstSoStuckWorkSurfaces()
         {
             var backlog = await TestBacklog.CreateAsync(wipLimit: 10);
 
@@ -195,7 +195,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Age_is_measured_from_the_start_of_work()
+        public void AgeDays_WorkHasStarted_IsMeasuredFromTheStartOfWork()
         {
             var now = new DateTimeOffset(2026, 8, 6, 0, 0, 0, TimeSpan.Zero);
             var ticket = new Ticket { StartedAt = now.AddDays(-4.5) };
@@ -204,7 +204,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Unstarted_work_has_no_age() =>
+        public void AgeDays_WorkHasNotStarted_IsNull() =>
             Assert.Null(new Ticket().AgeDays(DateTimeOffset.UtcNow));
     }
 }

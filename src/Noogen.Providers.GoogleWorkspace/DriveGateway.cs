@@ -10,6 +10,14 @@ namespace Noogen.Providers.GoogleWorkspace
     {
         public const string FolderMimeType = "application/vnd.google-apps.folder";
         public const string SpreadsheetMimeType = "application/vnd.google-apps.spreadsheet";
+
+        /// <summary>
+        /// The type a ticket document *is* in Drive. Markdown is what we send and what we ask for
+        /// back; the stored file is a Doc so that opening it renders.
+        /// </summary>
+        public const string DocumentMimeType = "application/vnd.google-apps.document";
+
+        /// <summary>The type we upload and export as. Never the type of a stored file.</summary>
         public const string MarkdownMimeType = "text/markdown";
 
         readonly IDriveClientFactory _factory;
@@ -91,17 +99,23 @@ namespace Noogen.Providers.GoogleWorkspace
             return created.Id;
         }
 
-        public async Task<string> CreateTextFileAsync(string parentId, string name, string content, string mimeType, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Two mime types, and they are not the same thing: the metadata one is what the file
+        /// should *become*, the upload one is what we are *sending*. Drive converts between them.
+        /// Send them equal and you get a markdown file, which is the behaviour this replaced.
+        /// </summary>
+        public async Task<string> CreateDocAsync(string parentId, string name, string markdown, CancellationToken cancellationToken = default)
         {
             var metadata = new DriveFile
             {
                 Name = name,
+                MimeType = DocumentMimeType,
                 Parents = [parentId]
             };
 
-            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(markdown));
 
-            var request = Service.Files.Create(metadata, stream, mimeType);
+            var request = Service.Files.Create(metadata, stream, MarkdownMimeType);
             request.Fields = "id";
             request.SupportsAllDrives = true;
 
@@ -112,10 +126,14 @@ namespace Noogen.Providers.GoogleWorkspace
             return request.ResponseBody.Id;
         }
 
-        public async Task<string> ReadTextFileAsync(string fileId, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Export, not download. A Google Doc has no stored bytes to fetch — <c>alt=media</c> on
+        /// one fails — so the content only exists in whichever format we ask Drive to render.
+        /// No SupportsAllDrives here: export takes no such parameter and needs none.
+        /// </summary>
+        public async Task<string> ReadDocAsync(string fileId, CancellationToken cancellationToken = default)
         {
-            var request = Service.Files.Get(fileId);
-            request.SupportsAllDrives = true;
+            var request = Service.Files.Export(fileId, MarkdownMimeType);
 
             using var stream = new MemoryStream();
             await request.DownloadAsync(stream, cancellationToken);
@@ -123,11 +141,15 @@ namespace Noogen.Providers.GoogleWorkspace
             return Encoding.UTF8.GetString(stream.ToArray());
         }
 
-        public async Task UpdateTextFileAsync(string fileId, string content, string mimeType, CancellationToken cancellationToken = default)
+        public async Task UpdateDocAsync(string fileId, string markdown, CancellationToken cancellationToken = default)
         {
-            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+            // Restating the target type is what asks Drive to convert the upload rather than
+            // replace the Doc with a markdown file.
+            var metadata = new DriveFile { MimeType = DocumentMimeType };
 
-            var request = Service.Files.Update(new DriveFile(), fileId, stream, mimeType);
+            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(markdown));
+
+            var request = Service.Files.Update(metadata, fileId, stream, MarkdownMimeType);
             request.SupportsAllDrives = true;
 
             var progress = await request.UploadAsync(cancellationToken);

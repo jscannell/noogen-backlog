@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using Google.Apis.Json;
 using Google.Apis.Util.Store;
 
@@ -54,8 +53,11 @@ namespace Noogen.Providers.GoogleWorkspace.Security
             {
                 return Task.FromResult(NewtonsoftJsonSerializer.Instance.Deserialize<T>(plaintext));
             }
-            catch (JsonException)
+            catch (Newtonsoft.Json.JsonException)
             {
+                // Must be Newtonsoft's exception, not System.Text.Json's: the serializer above is
+                // Google's, and catching the wrong one would let a truncated token file crash the
+                // CLI rather than degrade to "sign in again".
                 return Task.FromResult(default(T)!);
             }
         }

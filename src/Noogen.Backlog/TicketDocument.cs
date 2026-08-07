@@ -1,60 +1,129 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Noogen.Backlog
 {
     /// <summary>
-    /// The markdown ticket: `---` delimited frontmatter mirroring the Sheet row, then the body.
+    /// The markdown ticket: an `# &lt;ID&gt; — &lt;Title&gt;` heading, a bullet list of the fields a
+    /// human edits, then the prose.
+    ///
+    /// Every part of it renders. Drive is where a person who does not use the CLI reads a ticket,
+    /// and Drive does not special-case YAML frontmatter the way a code host does — a `---` block
+    /// there shows as literal text or is swallowed as a horizontal rule, so the first thing the
+    /// reader saw was machine plumbing.
+    ///
+    /// The heading is the only home of the id and the title. They used to sit in frontmatter *and*
+    /// in a heading that nothing ever rewrote, so `edit --title` left the heading permanently
+    /// stale and no check could catch it: <c>doctor</c> compares the Sheet against the metadata,
+    /// and those two agreed.
     ///
     /// The Sheet is the source of truth — <c>doctor</c> reports drift and <c>reindex</c> can
-    /// rebuild Sheet rows from these documents if the index is ever damaged. Unrecognised
-    /// frontmatter keys round-trip untouched so a field a human adds by hand is not eaten.
+    /// rebuild Sheet rows from these documents if the index is ever damaged. Unrecognised keys
+    /// round-trip untouched so a field a human adds by hand is not eaten.
     /// </summary>
     public class TicketDocument
     {
-        public const string Delimiter = "---";
-
         public Ticket Ticket { get; set; } = new();
 
+        /// <summary>
+        /// The prose, from the first line that is not part of the metadata block onwards. The store
+        /// regenerates the heading and the bullets on every write and copies this through verbatim,
+        /// so everything a person types below them is theirs.
+        /// </summary>
         public string Body { get; set; } = string.Empty;
+
+        const string Separator = " — ";
+
+        /// <summary>
+        /// `- **Key:** value`, also accepting the colon outside the bold and `*` for the bullet,
+        /// because a human editing in Drive will type whichever they remember. The key then goes
+        /// through <see cref="SheetSchema.Canonical"/>, so 'Job size' and 'job_size' are one field.
+        /// </summary>
+        static readonly Regex FieldPattern = new(
+            @"^\s*[-*]\s+\*\*(?<key>[^*]+?)\*\*\s*:?[ \t]*(?<value>.*)$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// What may stand between the id and the title. We write an em dash; a person retyping the
+        /// heading may well not. The earliest one in the line wins, so a title that itself contains
+        /// a dash or a colon splits after the id rather than inside itself.
+        /// </summary>
+        static readonly string[] HeadingSeparators = [" — ", " – ", " - ", ": "];
+
+        /// <summary>
+        /// A field value Docs turned into a link. Docs autolinks anything email- or URL-shaped when
+        /// it imports the document, so `- **Owner:** j@noogen.ai` comes back out of the export as
+        /// `- **Owner:** [j@noogen.ai](mailto:j@noogen.ai)`. Left alone that is an owner nobody
+        /// typed, and <c>reindex</c> — which takes area and owner from the document — would write
+        /// it into the Sheet. `doctor` compares neither, so nothing would have caught it.
+        ///
+        /// Only a value that is *entirely* one link is unwrapped. These fields are short scalars,
+        /// never prose, so a whole-value link is always just its own text wearing a link. Prose is
+        /// untouched: a link a person put in the body is theirs and renders as they meant it.
+        /// </summary>
+        static readonly Regex WholeValueLink = new(
+            @"^\[(?<text>[^\]]*)\]\([^()\s]*\)$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        /// <summary>The bare `&lt;j@noogen.ai&gt;` autolink, which is the same thing spelled shorter.</summary>
+        static readonly Regex WholeValueAutolink = new(
+            @"^<(?<text>[^<>\s]+)>$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// The ASCII punctuation a backslash may escape in markdown. Docs' export puts one in front
+        /// of anything it thinks could be read as markup, so a title with a hyphen or an underscore
+        /// — `Fix the sign-in flow`, `follow_up work` — comes back as `Fix the sign\-in flow`.
+        /// </summary>
+        const string EscapablePunctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 
         public static TicketDocument Parse(string content)
         {
             ArgumentNullException.ThrowIfNull(content);
 
-            var normalized = content.Replace("\r\n", "\n");
-            var lines = normalized.Split('\n');
+            var lines = content.Replace("\r\n", "\n").Split('\n');
+            var index = 0;
 
-            if (lines.Length == 0 || lines[0].Trim() != Delimiter)
-                throw new FormatException($"Ticket document must open with a '{Delimiter}' frontmatter delimiter.");
+            while (index < lines.Length && lines[index].Trim().Length == 0)
+                index++;
+
+            if (index >= lines.Length)
+                throw new FormatException($"Ticket document is empty. It must open with an '# <ID>{Separator}<Title>' heading.");
+
+            var heading = lines[index].Trim();
+            if (!heading.StartsWith("# ", StringComparison.Ordinal))
+                throw new FormatException($"Ticket document must open with an '# <ID>{Separator}<Title>' heading, not '{heading}'.");
 
             var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var bodyStart = -1;
+            ReadHeading(heading, fields);
+            index++;
 
-            for (var i = 1; i < lines.Length; i++)
+            // The metadata block runs from the heading to the first line that is neither blank nor
+            // one of its bullets. Prose typed straight under the heading is body, not a field, and
+            // stays exactly where its author put it.
+            var bodyStart = lines.Length;
+
+            for (; index < lines.Length; index++)
             {
-                var line = lines[i];
+                if (lines[index].Trim().Length == 0)
+                    continue;
 
-                if (line.Trim() == Delimiter)
+                var match = FieldPattern.Match(lines[index]);
+                if (!match.Success)
                 {
-                    bodyStart = i + 1;
+                    bodyStart = index;
                     break;
                 }
 
-                if (line.Trim().Length == 0)
-                    continue;
+                var written = Unescape(match.Groups["key"].Value.Trim().TrimEnd(':').Trim());
+                var key = SheetSchema.Canonical(written) ?? written;
 
-                var colonIndex = line.IndexOf(':');
-                if (colonIndex < 0)
-                    throw new FormatException($"Invalid frontmatter line {i + 1}: '{line}'. Expected 'key: value'.");
-
-                var key = line[..colonIndex].Trim();
-                var value = line[(colonIndex + 1)..].Trim();
-                fields[key] = value;
+                // First occurrence wins, as it does in the header row — and the heading was read
+                // first, so an `- **ID:**` bullet someone left behind cannot override it.
+                if (key.Length > 0 && !fields.ContainsKey(key))
+                    fields[key] = Unescape(Unlink(match.Groups["value"].Value.Trim()));
             }
-
-            if (bodyStart < 0)
-                throw new FormatException($"Ticket document frontmatter is not closed with a '{Delimiter}' delimiter.");
 
             var body = bodyStart < lines.Length
                 ? string.Join('\n', lines[bodyStart..]).Trim('\n')
@@ -72,18 +141,104 @@ namespace Noogen.Backlog
             ArgumentNullException.ThrowIfNull(ticket);
 
             var builder = new StringBuilder();
-            builder.Append(Delimiter).Append('\n');
+
+            builder.Append("# ").Append(SingleLine(ticket.Id)).Append(Separator).Append(SingleLine(ticket.Title)).Append("\n\n");
 
             foreach (var field in ToFields(ticket))
-                builder.Append(field.Key).Append(": ").Append(field.Value).Append('\n');
+                builder.Append("- **").Append(field.Key).Append(":** ").Append(SingleLine(field.Value)).Append('\n');
 
-            builder.Append(Delimiter).Append('\n').Append('\n');
+            builder.Append('\n');
             builder.Append((body ?? string.Empty).Replace("\r\n", "\n").Trim('\n')).Append('\n');
 
             return builder.ToString();
         }
 
         public string Serialize() => Serialize(Ticket, Body);
+
+        /// <summary>
+        /// The id and the title come from the heading and nowhere else, which is the whole point of
+        /// putting them there: one copy cannot drift from another.
+        /// </summary>
+        static void ReadHeading(string heading, IDictionary<string, string> fields)
+        {
+            var text = heading[2..].Trim();
+            var at = -1;
+            var width = 0;
+
+            foreach (var candidate in HeadingSeparators)
+            {
+                var found = text.IndexOf(candidate, StringComparison.Ordinal);
+                if (found > 0 && (at < 0 || found < at))
+                {
+                    at = found;
+                    width = candidate.Length;
+                }
+            }
+
+            if (at < 0)
+                throw new FormatException($"Heading '{heading}' is not '# <ID>{Separator}<Title>'. An em dash separates the id from the title.");
+
+            var title = text[(at + width)..].Trim();
+            if (title.Length == 0)
+                throw new FormatException($"Heading '{heading}' has an id but no title.");
+
+            // Unescaped after the split, not before: the separator we write is an em dash, which
+            // Docs never escapes, so splitting the raw line cannot land inside an escape sequence.
+            fields[SheetSchema.Id] = Unescape(text[..at].Trim());
+            fields[SheetSchema.Title] = Unescape(title);
+        }
+
+        /// <summary>
+        /// Gives back the text of a field value that is wholly a link, and anything else unchanged.
+        /// See <see cref="WholeValueLink"/> for why this has to happen at all.
+        /// </summary>
+        static string Unlink(string value)
+        {
+            var link = WholeValueLink.Match(value);
+            if (link.Success)
+                return link.Groups["text"].Value.Trim();
+
+            var autolink = WholeValueAutolink.Match(value);
+            return autolink.Success ? autolink.Groups["text"].Value.Trim() : value;
+        }
+
+        /// <summary>
+        /// Drops the backslashes Docs' export put in front of punctuation. `Fix the sign\-in flow`
+        /// is the title someone typed as `Fix the sign-in flow`, and without this the two never
+        /// agree again: <c>doctor</c> compares the Sheet's title against the document's and reports
+        /// drift on a ticket nobody touched, while <c>reindex</c> — which takes area and owner from
+        /// the document — would write the backslash into the Sheet.
+        ///
+        /// The loop settles the same way <see cref="Unlink"/>'s does. We read the plain text and
+        /// write plain text back; Docs re-escapes it on the next import, and the read after that
+        /// strips it again. Nothing accumulates, and nothing needs escaping on the way out, because
+        /// `\-` and `-` import to the same character.
+        ///
+        /// Scalars only, never the body. Below the bullets is the author's, the escapes render as
+        /// they meant, and rewriting prose to taste is how an edit gets eaten (invariant 9).
+        /// </summary>
+        static string Unescape(string value)
+        {
+            if (!value.Contains('\\', StringComparison.Ordinal))
+                return value;
+
+            var unescaped = new StringBuilder(value.Length);
+
+            for (var at = 0; at < value.Length; at++)
+            {
+                // A backslash before anything else — or trailing — is a literal one somebody typed.
+                if (value[at] == '\\'
+                    && at + 1 < value.Length
+                    && EscapablePunctuation.Contains(value[at + 1], StringComparison.Ordinal))
+                {
+                    at++;
+                }
+
+                unescaped.Append(value[at]);
+            }
+
+            return unescaped.ToString();
+        }
 
         static Ticket ToTicket(IDictionary<string, string> fields)
         {
@@ -96,35 +251,19 @@ namespace Noogen.Backlog
                 return fields.TryGetValue(key, out var value) && value.Length > 0 ? value : null;
             }
 
-            ticket.Id = Take(SheetSchema.Id) ?? throw new FormatException("Ticket document is missing the required 'id' field.");
-            ticket.Title = Take(SheetSchema.Title) ?? throw new FormatException($"Ticket '{ticket.Id}' is missing the required 'title' field.");
+            ticket.Id = Take(SheetSchema.Id) ?? throw new FormatException($"Ticket document is missing the required '{SheetSchema.Id}' field.");
+            ticket.Title = Take(SheetSchema.Title) ?? throw new FormatException($"Ticket '{ticket.Id}' is missing the required '{SheetSchema.Title}' field.");
             ticket.Type = Vocabulary.Parse<TicketType>(Take(SheetSchema.Type) ?? "feature", SheetSchema.Type);
             ticket.Area = Take(SheetSchema.Area) ?? string.Empty;
             ticket.Owner = Take(SheetSchema.Owner);
 
             ticket.Score = new WsjfScore
             {
-                BusinessValue = ParseScore(Take(SheetSchema.Bv), SheetSchema.Bv),
-                TimeCriticality = ParseScore(Take(SheetSchema.Tc), SheetSchema.Tc),
-                RiskReductionOpportunityEnablement = ParseScore(Take(SheetSchema.Rroe), SheetSchema.Rroe),
-                JobSize = ParseScore(Take(SheetSchema.Size), SheetSchema.Size)
+                BusinessValue = ParseScore(Take(SheetSchema.BusinessValue), SheetSchema.BusinessValue),
+                TimeCriticality = ParseScore(Take(SheetSchema.TimeCriticality), SheetSchema.TimeCriticality),
+                RiskReductionOpportunityEnablement = ParseScore(Take(SheetSchema.RiskOpportunity), SheetSchema.RiskOpportunity),
+                JobSize = ParseScore(Take(SheetSchema.JobSize), SheetSchema.JobSize)
             };
-
-            // These are no longer written, but a legacy or hand-edited document may still carry
-            // them. Read them so nothing regresses; they simply do not round-trip back out.
-            ticket.Phase = ParsePhase(Take("phase"));
-            ticket.State = Vocabulary.ParseOptional<WorkState>(Take(SheetSchema.State), SheetSchema.State);
-            ticket.BlockedReason = Take(SheetSchema.BlockedReason);
-            ticket.BlockedAt = Iso.ParseOptional(Take(SheetSchema.BlockedAt), SheetSchema.BlockedAt);
-            ticket.StartedAt = Iso.ParseOptional(Take(SheetSchema.StartedAt), SheetSchema.StartedAt);
-            ticket.Outcome = Vocabulary.ParseOptional<Outcome>(Take(SheetSchema.Outcome), SheetSchema.Outcome);
-            ticket.ArchivedAt = Iso.ParseOptional(Take(SheetSchema.ArchivedAt), SheetSchema.ArchivedAt);
-
-            var created = Take(SheetSchema.Created);
-            ticket.Created = created is null ? default : Iso.Parse(created, SheetSchema.Created);
-
-            var updated = Take(SheetSchema.Updated);
-            ticket.Updated = updated is null ? ticket.Created : Iso.Parse(updated, SheetSchema.Updated);
 
             foreach (var field in fields)
             {
@@ -136,17 +275,20 @@ namespace Noogen.Backlog
         }
 
         /// <summary>
-        /// Only fields a person would sensibly edit by hand.
+        /// Only fields a person would sensibly edit by hand, and not the id or the title — those
+        /// are the heading.
+        ///
+        /// Area and owner stay here even though the Sheet also carries them. They are content, not
+        /// bookkeeping: <c>reindex</c> rebuilds a damaged row's content from the document, so
+        /// dropping them would leave the Sheet as their only copy — the one thing the repair path
+        /// exists to survive. They are also the first things a reader wants; a ticket that does not
+        /// say who owns it is a worse document.
         ///
         /// Deliberately absent: timestamps, phase, and work state. Those are machine bookkeeping,
-        /// and a document is something humans edit — hand-maintaining ISO-8601 in frontmatter is
-        /// hostile, and a hand-edited `phase` would desync from the tab that actually defines it.
-        /// The Sheet owns them, Drive's own createdTime/modifiedTime back up the first two, and
-        /// the Activity Log records every lifecycle event in prose. Nothing is lost by omitting
-        /// them here; a stale duplicate would be worse than no duplicate.
-        ///
-        /// Legacy documents that still carry those keys are read (see <see cref="ToTicket"/>) and
-        /// simply not written back.
+        /// and hand-maintaining ISO-8601 is hostile while a hand-edited `phase` would desync from
+        /// the tab that actually defines it. The Sheet owns them, Drive's own createdTime and
+        /// modifiedTime back up the first two, and the Activity Log records every lifecycle event
+        /// in prose.
         /// </summary>
         static IEnumerable<KeyValuePair<string, string>> ToFields(Ticket ticket)
         {
@@ -158,20 +300,50 @@ namespace Noogen.Backlog
                     fields.Add(new KeyValuePair<string, string>(key, value));
             }
 
-            Add(SheetSchema.Id, ticket.Id);
-            Add(SheetSchema.Title, ticket.Title);
             Add(SheetSchema.Type, Vocabulary.ToWire(ticket.Type));
             Add(SheetSchema.Area, ticket.Area);
             Add(SheetSchema.Owner, ticket.Owner);
-            Add(SheetSchema.Bv, Format(ticket.Score.BusinessValue));
-            Add(SheetSchema.Tc, Format(ticket.Score.TimeCriticality));
-            Add(SheetSchema.Rroe, Format(ticket.Score.RiskReductionOpportunityEnablement));
-            Add(SheetSchema.Size, Format(ticket.Score.JobSize));
+            Add(SheetSchema.BusinessValue, Format(ticket.Score.BusinessValue));
+            Add(SheetSchema.TimeCriticality, Format(ticket.Score.TimeCriticality));
+            Add(SheetSchema.RiskOpportunity, Format(ticket.Score.RiskReductionOpportunityEnablement));
+            Add(SheetSchema.JobSize, Format(ticket.Score.JobSize));
 
             foreach (var extra in ticket.ExtraFields)
                 Add(extra.Key, extra.Value);
 
             return fields;
+        }
+
+        /// <summary>
+        /// A title is untrusted input and a heading is one line, so a newline in it would split the
+        /// document rather than fail — the tail would parse as body, or as nothing. Collapsing is
+        /// the honest fix: every character survives, and a title spanning lines was never going to
+        /// render as one anyway.
+        /// </summary>
+        static string SingleLine(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return string.Empty;
+
+            var collapsed = new StringBuilder(value.Length);
+            var pending = false;
+
+            foreach (var character in value)
+            {
+                if (character is '\n' or '\r' or '\t')
+                {
+                    pending = true;
+                    continue;
+                }
+
+                if (pending && collapsed.Length > 0)
+                    collapsed.Append(' ');
+
+                pending = false;
+                collapsed.Append(character);
+            }
+
+            return collapsed.ToString().Trim();
         }
 
         static string? Format(int? value) => value?.ToString(CultureInfo.InvariantCulture);
@@ -195,25 +367,131 @@ namespace Noogen.Backlog
             return parsed;
         }
 
-        internal static string PhaseToWire(BacklogPhase phase) => Vocabulary.ToWire(phase);
-
-        internal static BacklogPhase ParsePhase(string? wire) =>
-            string.IsNullOrWhiteSpace(wire) ? BacklogPhase.Backlog : Vocabulary.Parse<BacklogPhase>(wire.Trim(), "phase");
-
+        /// <summary>
+        /// The prose a new ticket starts with. No heading — <see cref="Serialize"/> writes that from
+        /// the ticket, so putting one here would give the document two.
+        ///
+        /// Emphasis is `*asterisks*`, not `_underscores_`, because Docs renormalises the second to
+        /// the first on import. Writing what the export already produces means a new ticket's body
+        /// survives its first save unchanged rather than coming back subtly rewritten.
+        /// </summary>
         public static string BuildInitialBody(Ticket ticket, string? description, TimeZoneInfo? zone = null)
         {
             var builder = new StringBuilder();
 
-            builder.Append("# ").Append(ticket.Id).Append(" — ").Append(ticket.Title).Append("\n\n");
             builder.Append("## Description\n\n");
-            builder.Append(string.IsNullOrWhiteSpace(description) ? "_TODO_" : description.Trim()).Append("\n\n");
-            builder.Append("## Acceptance Criteria\n\n- [ ] _TODO_\n\n");
+            builder.Append(string.IsNullOrWhiteSpace(description) ? "*TODO*" : description.Trim()).Append("\n\n");
+            builder.Append("## Acceptance Criteria\n\n- [ ] *TODO*\n\n");
             builder.Append("## Notes\n\n");
             builder.Append("## Activity Log\n\n");
             builder.Append("- ").Append(SheetTime.FormatWithZone(ticket.Created, zone ?? TimeZoneInfo.Utc)).Append(" — created\n");
 
             return builder.ToString();
         }
+
+        /// <summary>The one body section the CLI will rewrite. See <see cref="ReplaceSection"/>.</summary>
+        public const string DescriptionHeading = "Description";
+
+        /// <summary>
+        /// Replaces the text under one heading, and touches nothing else in the body.
+        ///
+        /// This is the one exception to "the store never rewrites prose", and it is deliberately
+        /// the *narrowest* one that closes the gap: without it a description could only be seeded
+        /// at <c>new</c> and never corrected from the CLI. It is bounded the same way
+        /// <see cref="AppendActivity"/> is — by a heading a person can see. The section ends at the
+        /// next heading of the same level or higher, so Acceptance Criteria, Notes, the Activity
+        /// Log, and any section a human added come through byte-identical, and a `###` subheading
+        /// *inside* the description is part of it rather than the end of it.
+        ///
+        /// A missing heading inserts one at the top rather than failing or guessing at which
+        /// existing section was meant. Insertion cannot eat anything, which is the property that
+        /// matters: someone who renamed or deleted the section gets a visible new one, not a
+        /// silently overwritten old one.
+        ///
+        /// The replacement is written plain. Docs re-escapes and re-links it on the next import
+        /// exactly as it does everything else here (invariant 18), and this text is prose, so it
+        /// is never unescaped on the way back — it renders as its author meant it.
+        /// </summary>
+        public static string ReplaceSection(string body, string heading, string text)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(heading);
+
+            var lines = (body ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+            var replacement = (text ?? string.Empty).Replace("\r\n", "\n").Trim('\n');
+
+            var start = -1;
+            var level = 0;
+
+            for (var index = 0; index < lines.Length && start < 0; index++)
+            {
+                var found = HeadingLevel(lines[index]);
+
+                if (found > 0 && string.Equals(HeadingText(lines[index], found), heading, StringComparison.OrdinalIgnoreCase))
+                {
+                    start = index;
+                    level = found;
+                }
+            }
+
+            var rebuilt = new List<string>();
+
+            if (start < 0)
+            {
+                rebuilt.Add($"## {heading}");
+                rebuilt.Add(string.Empty);
+                rebuilt.AddRange(replacement.Split('\n'));
+                rebuilt.Add(string.Empty);
+                rebuilt.AddRange(lines);
+
+                return Join(rebuilt);
+            }
+
+            // A heading of the same level or higher ends the section; a deeper one is inside it.
+            var end = lines.Length;
+
+            for (var index = start + 1; index < lines.Length; index++)
+            {
+                var found = HeadingLevel(lines[index]);
+
+                if (found > 0 && found <= level)
+                {
+                    end = index;
+                    break;
+                }
+            }
+
+            rebuilt.AddRange(lines[..(start + 1)]);
+            rebuilt.Add(string.Empty);
+            rebuilt.AddRange(replacement.Split('\n'));
+
+            if (end < lines.Length)
+            {
+                rebuilt.Add(string.Empty);
+                rebuilt.AddRange(lines[end..]);
+            }
+
+            return Join(rebuilt);
+        }
+
+        static string Join(IEnumerable<string> lines) => string.Join('\n', lines).Trim('\n') + "\n";
+
+        /// <summary>
+        /// The `#` count of a markdown heading line, or 0 for a line that is not one. The space is
+        /// required, as it is in markdown itself — `#hashtag` opening a paragraph is not a heading,
+        /// and treating it as one would end a section in the middle of somebody's sentence.
+        /// </summary>
+        static int HeadingLevel(string line)
+        {
+            var text = line.TrimStart();
+            var hashes = 0;
+
+            while (hashes < text.Length && text[hashes] == '#')
+                hashes++;
+
+            return hashes > 0 && hashes < text.Length && text[hashes] == ' ' ? hashes : 0;
+        }
+
+        static string HeadingText(string line, int level) => line.TrimStart()[level..].Trim();
 
         const string ActivityHeading = "## Activity Log";
 

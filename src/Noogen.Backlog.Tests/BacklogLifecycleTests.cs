@@ -11,11 +11,11 @@ namespace Noogen.Backlog.Tests
         [InlineData(BacklogPhase.Archive, BacklogPhase.InProgress, false)]
         [InlineData(BacklogPhase.Backlog, BacklogPhase.Backlog, false)]
         [InlineData(BacklogPhase.Archive, BacklogPhase.Archive, false)]
-        public void Enforces_the_transition_table(BacklogPhase from, BacklogPhase to, bool allowed) =>
+        public void CanTransitionTo_EveryPairOfPhases_FollowsTheTransitionTable(BacklogPhase from, BacklogPhase to, bool allowed) =>
             Assert.Equal(allowed, from.CanTransitionTo(to));
 
         [Fact]
-        public void Only_the_backlog_is_ranked_and_carries_live_formulas()
+        public void IsRanked_EveryPhase_IsTrueOnlyForTheBacklog()
         {
             Assert.True(BacklogPhase.Backlog.IsRanked());
             Assert.False(BacklogPhase.InProgress.IsRanked());
@@ -27,7 +27,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Tab_names_round_trip() =>
+        public void FromTabName_NameProducedByTabName_ReturnsTheSamePhase() =>
             Assert.All(BacklogPhaseExtensions.All, phase =>
                 Assert.Equal(phase, BacklogPhaseExtensions.FromTabName(phase.TabName())));
     }
@@ -35,7 +35,7 @@ namespace Noogen.Backlog.Tests
     public class BacklogStoreTests
     {
         [Fact]
-        public async Task Creates_a_ticket_with_a_document_and_an_index_row()
+        public async Task AddAsync_NewTicket_CreatesADocumentAndAnIndexRow()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("WSJF index tool");
@@ -51,7 +51,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Allocates_ids_as_max_plus_one_across_every_tab()
+        public async Task AddAsync_EarlierIdsLiveOnOtherTabs_AllocatesMaxPlusOneAcrossThemAll()
         {
             var backlog = await TestBacklog.CreateAsync();
 
@@ -69,7 +69,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Backlog_rows_carry_formulas_and_started_rows_carry_frozen_values()
+        public async Task StartAsync_RowLeavesTheBacklogTab_FreezesTheFormulasIntoValues()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something", bv: 8, tc: 3, rroe: 2, size: 5);
@@ -81,12 +81,12 @@ namespace Noogen.Backlog.Tests
 
             // Frozen: a plain number, no formula, and no rank column at all on this tab.
             Assert.Equal("2.6", backlog.CellText(BacklogPhase.InProgress, ticket.Id, SheetSchema.Wsjf));
-            Assert.Equal("13", backlog.CellText(BacklogPhase.InProgress, ticket.Id, SheetSchema.Cod));
+            Assert.Equal("13", backlog.CellText(BacklogPhase.InProgress, ticket.Id, SheetSchema.CostOfDelay));
             Assert.DoesNotContain(SheetSchema.Rank, SheetSchema.Columns(BacklogPhase.InProgress));
         }
 
         [Fact]
-        public async Task Title_cell_keeps_its_plain_text_and_gains_a_link()
+        public async Task AddAsync_NewTicket_LeavesTheTitleCellAsPlainTextCarryingALink()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("WSJF index tool");
@@ -98,7 +98,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Ranks_scored_items_by_wsjf_and_sorts_unscored_last()
+        public async Task ListAsync_QueueMixesScoredAndUnscored_RanksByWsjfAndSortsUnscoredLast()
         {
             var backlog = await TestBacklog.CreateAsync();
 
@@ -113,7 +113,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Starting_work_moves_the_row_but_leaves_the_document_in_place()
+        public async Task StartAsync_WorkBegins_MovesTheRowButLeavesTheDocumentInPlace()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -132,7 +132,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Started_items_leave_the_queue_and_appear_in_wip()
+        public async Task StartAsync_WorkBegins_RemovesItFromTheQueueAndAddsItToWip()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -144,7 +144,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Scoring_a_started_item_is_refused_with_the_reason()
+        public async Task ScoreAsync_WorkHasAlreadyStarted_ThrowsExplainingWhy()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -157,7 +157,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Blocking_records_a_reason_and_a_timestamp_then_clears_on_unblock()
+        public async Task SetStateAsync_BlockedThenUnblocked_RecordsTheReasonThenClearsIt()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -179,7 +179,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Blocking_without_a_reason_is_refused()
+        public async Task SetStateAsync_BlockedWithNoReason_Throws()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -190,7 +190,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Work_state_cannot_be_set_on_an_unstarted_item()
+        public async Task SetStateAsync_WorkHasNotStarted_ThrowsPointingAtBacklogStart()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -205,7 +205,7 @@ namespace Noogen.Backlog.Tests
     public class ArchiveTests
     {
         [Fact]
-        public async Task Archiving_moves_the_row_and_the_document_but_deletes_nothing()
+        public async Task ArchiveAsync_TicketIsArchived_MovesTheRowAndDocumentWithoutDeletingAnything()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -225,7 +225,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Freezes_lead_and_cycle_time_at_archive_time()
+        public async Task ArchiveAsync_TicketIsArchived_FreezesLeadAndCycleTime()
         {
             var start = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
             var backlog = await TestBacklog.CreateAsync(start);
@@ -241,7 +241,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Same_day_work_yields_zero_not_a_negative_number()
+        public async Task ArchiveAsync_StartedAndArchivedTheSameDay_ReportsZeroRatherThanANegativeNumber()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -254,7 +254,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Cancelling_straight_from_the_backlog_is_allowed_and_has_no_cycle_time()
+        public async Task ArchiveAsync_CancelledStraightFromTheBacklog_HasLeadTimeButNoCycleTime()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Never starting this");
@@ -267,7 +267,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Archiving_twice_is_refused()
+        public async Task ArchiveAsync_TicketIsAlreadyArchived_Throws()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -278,7 +278,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Restore_returns_it_to_the_queue_with_live_formulas()
+        public async Task RestoreAsync_TicketIsArchived_ReturnsItToTheQueueWithLiveFormulas()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -298,7 +298,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Restoring_something_that_is_not_archived_is_refused()
+        public async Task RestoreAsync_TicketIsNotArchived_Throws()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -310,7 +310,7 @@ namespace Noogen.Backlog.Tests
     public class MoveOrderingTests
     {
         [Fact]
-        public async Task An_interrupted_move_duplicates_the_ticket_rather_than_losing_it()
+        public async Task StartAsync_DeleteFailsAfterTheAppend_DuplicatesTheTicketRatherThanLosingIt()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -325,7 +325,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Doctor_reports_the_duplicate_an_interrupted_move_leaves_behind()
+        public async Task DoctorAsync_AnInterruptedMoveLeftADuplicate_ReportsIt()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -340,7 +340,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Appends_before_it_deletes()
+        public async Task StartAsync_MovingARowAcrossTabs_AppendsBeforeItDeletes()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -354,6 +354,49 @@ namespace Noogen.Backlog.Tests
             // The append happened; the delete was attempted after it and failed.
             Assert.True(backlog.Sheets.AppendRowCallCount > appendsBefore);
             Assert.True(backlog.Sheets.DeleteRowCallCount > deletesBefore);
+        }
+
+        [Fact]
+        public async Task CreateAsync_BacklogStillHasTheLegacyShortHeaders_WritesAFullRowAndKeepsTheHeadersAsTheyAre()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            await backlog.UseLegacyHeadersAsync();
+
+            var ticket = await backlog.AddAsync("Something", bv: 8, tc: 3, rroe: 2, size: 5);
+
+            Assert.Equal("8", backlog.CellText(BacklogPhase.Backlog, ticket.Id, SheetSchema.BusinessValue));
+            Assert.Equal("2", backlog.CellText(BacklogPhase.Backlog, ticket.Id, SheetSchema.RiskOpportunity));
+            Assert.StartsWith("=", backlog.CellText(BacklogPhase.Backlog, ticket.Id, SheetSchema.Wsjf));
+            Assert.Equal(ticket.DocId, backlog.CellText(BacklogPhase.Backlog, ticket.Id, SheetSchema.DriveFileId));
+
+            // Untouched: we understand the old header row, we do not rewrite it.
+            Assert.Equal("rroe", backlog.Sheets.Rows(BacklogPhase.Backlog.TabName())[0][7]?.ToString());
+        }
+
+        [Fact]
+        public async Task DoctorAsync_BacklogStillHasTheLegacyShortHeaders_ReportsNoMissingColumns()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            await backlog.UseLegacyHeadersAsync();
+            await backlog.AddAsync("Something");
+
+            var report = await backlog.Store.DoctorAsync();
+
+            Assert.DoesNotContain(report.Issues, issue => issue.Kind == "missing-column");
+            Assert.True(report.IsHealthy);
+        }
+
+        [Fact]
+        public async Task StartAsync_BacklogStillHasTheLegacyShortHeaders_FreezesTheFormulasAcrossTheMove()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            await backlog.UseLegacyHeadersAsync();
+
+            var ticket = await backlog.AddAsync("Something", bv: 8, tc: 3, rroe: 2, size: 5);
+            await backlog.Store.StartAsync(ticket.Id, "jason", false);
+
+            Assert.Equal("2.6", backlog.CellText(BacklogPhase.InProgress, ticket.Id, SheetSchema.Wsjf));
+            Assert.Equal("13", backlog.CellText(BacklogPhase.InProgress, ticket.Id, SheetSchema.CostOfDelay));
         }
     }
 }

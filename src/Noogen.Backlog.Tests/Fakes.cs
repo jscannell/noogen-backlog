@@ -27,6 +27,26 @@ namespace Noogen.Backlog.Tests
         public bool WholeTab { get; set; }
     }
 
+    /// <summary>One recorded <c>SetDateTimeFormatAsync</c> call.</summary>
+    public class DateTimeFormatCall
+    {
+        public string TabName { get; set; } = string.Empty;
+
+        public IReadOnlyList<int> ColumnIndexes { get; set; } = [];
+
+        public int StartRowIndex { get; set; }
+
+        /// <summary>Null for an unbounded range — every row from the start downwards.</summary>
+        public int? EndRowIndex { get; set; }
+
+        public string Pattern { get; set; } = string.Empty;
+
+        public bool Covers(int sheetRowIndex, int columnIndex) =>
+            ColumnIndexes.Contains(columnIndex)
+            && sheetRowIndex >= StartRowIndex
+            && (EndRowIndex is null || sheetRowIndex < EndRowIndex);
+    }
+
     /// <summary>
     /// In-memory Sheets. Stores raw cell content, so a formula written by the index is readable
     /// back as its formula text — which is exactly what lets the tests assert that the Backlog
@@ -36,9 +56,17 @@ namespace Noogen.Backlog.Tests
     {
         readonly Dictionary<string, List<List<object>>> _tabs = new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>Tab order is part of the shape init produces, so the fake tracks it.</summary>
+        readonly List<string> _order = [];
+
         public Dictionary<string, string> Links { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public List<string> DateTimeFormattedColumns { get; } = [];
+        /// <summary>
+        /// Number formats are not cell content, so the fake records the calls rather than the
+        /// grid. The row range matters as much as the column: an appended row is inserted
+        /// unformatted, so a format that only ever covered the column would miss it.
+        /// </summary>
+        public List<DateTimeFormatCall> DateTimeFormats { get; } = [];
 
         public List<string> HiddenColumns { get; } = [];
 
@@ -54,16 +82,23 @@ namespace Noogen.Backlog.Tests
 
         public IReadOnlyList<IReadOnlyList<object>> Rows(string tabName) => Tab(tabName);
 
+        /// <summary>Stands in for the default tab a freshly created spreadsheet arrives with.</summary>
+        public void SeedTab(string tabName) => Tab(tabName);
+
         List<List<object>> Tab(string tabName)
         {
             if (!_tabs.TryGetValue(tabName, out var rows))
             {
                 rows = [];
                 _tabs[tabName] = rows;
+                _order.Add(tabName);
             }
 
             return rows;
         }
+
+        int OrderIndexOf(string tabName) =>
+            _order.FindIndex(name => string.Equals(name, tabName, StringComparison.OrdinalIgnoreCase));
 
         public Task<IList<IList<object>>> GetValuesAsync(string spreadsheetId, string range, CancellationToken cancellationToken = default)
         {
@@ -152,11 +187,40 @@ namespace Noogen.Backlog.Tests
         }
 
         public Task<IReadOnlyList<string>> ListTabsAsync(string spreadsheetId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<string>>(_tabs.Keys.ToList());
+            Task.FromResult<IReadOnlyList<string>>(_order.ToList());
 
         public Task EnsureTabAsync(string spreadsheetId, string tabName, CancellationToken cancellationToken = default)
         {
             Tab(tabName);
+            return Task.CompletedTask;
+        }
+
+        public Task RenameTabAsync(string spreadsheetId, string tabName, string newTabName, CancellationToken cancellationToken = default)
+        {
+            var rows = Tab(tabName);
+
+            _order[OrderIndexOf(tabName)] = newTabName;
+            _tabs.Remove(tabName);
+            _tabs[newTabName] = rows;
+
+            return Task.CompletedTask;
+        }
+
+        public Task SetTabOrderAsync(string spreadsheetId, IReadOnlyList<string> tabNames, CancellationToken cancellationToken = default)
+        {
+            var position = 0;
+
+            foreach (var tabName in tabNames)
+            {
+                var current = OrderIndexOf(tabName);
+                if (current < 0)
+                    continue;
+
+                _order.RemoveAt(current);
+                _order.Insert(position, tabName);
+                position++;
+            }
+
             return Task.CompletedTask;
         }
 
@@ -168,9 +232,19 @@ namespace Noogen.Backlog.Tests
             return Task.CompletedTask;
         }
 
-        public Task SetColumnDateTimeFormatAsync(string spreadsheetId, string tabName, int columnIndex, string pattern, CancellationToken cancellationToken = default)
+        public Task SetDateTimeFormatAsync(string spreadsheetId, string tabName, IReadOnlyList<int> columnIndexes, int startRowIndex, int? endRowIndex, string pattern, CancellationToken cancellationToken = default)
         {
-            DateTimeFormattedColumns.Add($"{tabName}!{columnIndex}");
+            if (columnIndexes.Count == 0)
+                return Task.CompletedTask;
+
+            var call = new DateTimeFormatCall();
+            call.TabName = tabName;
+            call.ColumnIndexes = [.. columnIndexes];
+            call.StartRowIndex = startRowIndex;
+            call.EndRowIndex = endRowIndex;
+            call.Pattern = pattern;
+
+            DateTimeFormats.Add(call);
             return Task.CompletedTask;
         }
 
@@ -287,17 +361,22 @@ namespace Noogen.Backlog.Tests
         public Task<string> CreateSpreadsheetAsync(string parentId, string name, CancellationToken cancellationToken = default) =>
             Task.FromResult(Add(parentId, name, DriveGateway.SpreadsheetMimeType, string.Empty));
 
-        public Task<string> CreateTextFileAsync(string parentId, string name, string content, string mimeType, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Add(parentId, name, mimeType, content));
+        /// <summary>
+        /// Stores the markdown verbatim under the Doc mime type. The real Drive converts in both
+        /// directions and is not byte-exact; that fidelity is the gateway's problem and is asserted
+        /// against the stub transport, so above the seam these fakes keep the content stable.
+        /// </summary>
+        public Task<string> CreateDocAsync(string parentId, string name, string markdown, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Add(parentId, name, DriveGateway.DocumentMimeType, markdown));
 
-        public Task<string> ReadTextFileAsync(string fileId, CancellationToken cancellationToken = default) =>
+        public Task<string> ReadDocAsync(string fileId, CancellationToken cancellationToken = default) =>
             _nodes.TryGetValue(fileId, out var node)
                 ? Task.FromResult(node.Content)
                 : throw new FileNotFoundException($"No such Drive file '{fileId}'.");
 
-        public Task UpdateTextFileAsync(string fileId, string content, string mimeType, CancellationToken cancellationToken = default)
+        public Task UpdateDocAsync(string fileId, string markdown, CancellationToken cancellationToken = default)
         {
-            _nodes[fileId].Content = content;
+            _nodes[fileId].Content = markdown;
             _nodes[fileId].ModifiedTime = Clock.GetUtcNow();
 
             return Task.CompletedTask;

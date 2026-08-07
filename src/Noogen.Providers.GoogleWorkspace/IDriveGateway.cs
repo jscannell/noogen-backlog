@@ -15,11 +15,22 @@ namespace Noogen.Providers.GoogleWorkspace
 
         Task<string> CreateSpreadsheetAsync(string parentId, string name, CancellationToken cancellationToken = default);
 
-        Task<string> CreateTextFileAsync(string parentId, string name, string content, string mimeType, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Creates a native Google Doc from markdown. Drive converts on the way in, so the file
+        /// that lands is a Doc — which is what makes its <c>webViewLink</c> a docs.google.com URL
+        /// that opens in the editor with the markdown rendered, rather than a Drive preview of
+        /// raw text. Markdown stays our wire format; the Doc is how a person reads it.
+        /// </summary>
+        Task<string> CreateDocAsync(string parentId, string name, string markdown, CancellationToken cancellationToken = default);
 
-        Task<string> ReadTextFileAsync(string fileId, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Exports a Google Doc back to markdown. The counterpart to <see cref="CreateDocAsync"/>:
+        /// a Doc has no bytes to download, so this is an export rather than a media read.
+        /// </summary>
+        Task<string> ReadDocAsync(string fileId, CancellationToken cancellationToken = default);
 
-        Task UpdateTextFileAsync(string fileId, string content, string mimeType, CancellationToken cancellationToken = default);
+        /// <summary>Replaces a Google Doc's content from markdown, converting on the way in.</summary>
+        Task UpdateDocAsync(string fileId, string markdown, CancellationToken cancellationToken = default);
 
         /// <summary>Re-parents a file. This is how archiving moves a ticket; nothing is ever trashed.</summary>
         Task MoveAsync(string fileId, string addParentId, string removeParentId, CancellationToken cancellationToken = default);
@@ -28,7 +39,7 @@ namespace Noogen.Providers.GoogleWorkspace
 
         /// <summary>
         /// Drive's own createdTime/modifiedTime. Used instead of duplicating those two into the
-        /// ticket's frontmatter, where a human would have to hand-maintain them. Drive's
+        /// ticket document, where a human would have to hand-maintain them. Drive's
         /// modifiedTime is also strictly better than a field we write, because it catches a
         /// person editing the document directly.
         /// </summary>

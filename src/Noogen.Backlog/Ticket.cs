@@ -52,8 +52,8 @@ namespace Noogen.Backlog
             StartedAt.HasValue ? Math.Round((now - StartedAt.Value).TotalDays, 1) : null;
 
         /// <summary>
-        /// Frontmatter keys the store did not recognise. Preserved so an unknown field a human
-        /// added by hand survives a round-trip instead of being silently dropped.
+        /// Document metadata keys the store did not recognise. Preserved so an unknown field a
+        /// human added by hand survives a round-trip instead of being silently dropped.
         /// </summary>
         public IDictionary<string, string> ExtraFields { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }

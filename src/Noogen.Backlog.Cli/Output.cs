@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Noogen.Providers.GoogleWorkspace;
 
 namespace Noogen.Backlog.Cli
 {
@@ -79,6 +80,21 @@ namespace Noogen.Backlog.Cli
             value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "-";
 
         public static string Text(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+    }
+
+    /// <summary>
+    /// Says out loud that a command is waiting on Google rather than hung. Stderr, always: stdout
+    /// under `--json` is a single document and an agent parses it, so nothing else may land there.
+    /// </summary>
+    public class ConsoleRetryListener : IRetryListener
+    {
+        public void RateLimited(int attempt, int maxAttempts, TimeSpan delay) =>
+            Output.WriteError(string.Format(
+                CultureInfo.InvariantCulture,
+                "Google is rate limiting requests; waiting {0:0.#}s before retry {1} of {2}.",
+                delay.TotalSeconds,
+                attempt,
+                maxAttempts - 1));
     }
 
     /// <summary>Stable JSON projection of a ticket. Nulls are elided, so absent means absent.</summary>

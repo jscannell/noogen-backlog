@@ -8,18 +8,18 @@ namespace Noogen.Backlog.Tests
         static readonly TimeZoneInfo Sydney = TimeZoneInfo.FindSystemTimeZoneById("Australia/Sydney");
 
         [Fact]
-        public void Epoch_is_the_lotus_compatible_1899_12_30() =>
+        public void ToSerial_TheEpochItself_IsZero() =>
             Assert.Equal(0, SheetTime.ToSerial(new DateTimeOffset(1899, 12, 30, 0, 0, 0, TimeSpan.Zero), TimeZoneInfo.Utc));
 
         [Fact]
-        public void Midday_is_a_half_day_past_midnight() =>
+        public void ToSerial_MiddayOnTheEpoch_IsHalfADay() =>
             Assert.Equal(0.5, SheetTime.ToSerial(new DateTimeOffset(1899, 12, 30, 12, 0, 0, TimeSpan.Zero), TimeZoneInfo.Utc));
 
         [Theory]
         [InlineData("2026-08-01T08:30:00Z")]
         [InlineData("2026-01-15T23:59:00Z")]
         [InlineData("2026-12-31T00:00:00Z")]
-        public void Round_trips_through_a_serial_in_every_zone(string iso)
+        public void FromSerial_SerialProducedByToSerial_ReturnsTheOriginalInstant(string iso)
         {
             var instant = DateTimeOffset.Parse(iso, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal);
 
@@ -31,7 +31,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void A_serial_is_wall_clock_in_the_configured_zone()
+        public void ToSerial_SameInstantInTwoZones_EncodesEachZonesWallClock()
         {
             // 12:00Z is 08:00 in New York in August. The serial must encode the local wall clock,
             // because that is what Sheets will render.
@@ -44,7 +44,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Spring_forward_gap_shifts_instead_of_throwing()
+        public void FromWallClock_TimeFallsInTheSpringForwardGap_ShiftsForwardInsteadOfThrowing()
         {
             // 02:30 on 8 March 2026 never happens in New York.
             var nonexistent = new DateTime(2026, 3, 8, 2, 30, 0);
@@ -57,7 +57,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Fall_back_ambiguity_resolves_to_the_earlier_instant()
+        public void FromWallClock_TimeIsInTheRepeatedFallBackHour_ResolvesToTheEarlierInstant()
         {
             // 01:30 on 1 Nov 2026 happens twice in New York. Picking the larger offset (-04:00)
             // means the earlier of the two, which keeps an activity log monotonic.
@@ -71,7 +71,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void The_ambiguous_hour_is_the_one_place_a_round_trip_can_lose_an_hour()
+        public void FromSerial_InstantIsInTheRepeatedHour_LosesAtMostOneHour()
         {
             // Honest about the cost of storing wall-clock serials: the second occurrence of the
             // repeated hour reads back as the first. Bounded at one hour, once a year, on metrics
@@ -85,7 +85,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Serials_sort_numerically_across_a_dst_boundary()
+        public void ToSerial_InstantsSpanADstBoundary_StillSortNumerically()
         {
             // The reason for real datetime cells rather than local text: sorting stays correct
             // through the repeated hour, which offset-carrying strings do not manage.
@@ -100,18 +100,18 @@ namespace Noogen.Backlog.Tests
         [InlineData("Europe/London")]
         [InlineData("Australia/Sydney")]
         [InlineData("UTC")]
-        public void Resolves_iana_ids_on_windows_linux_and_macos(string id) =>
+        public void ResolveZone_IanaId_ResolvesOnEveryPlatform(string id) =>
             Assert.NotNull(SheetTime.ResolveZone(id));
 
         [Fact]
-        public void Accepts_a_windows_id_as_a_courtesy() =>
+        public void ResolveZone_WindowsId_ResolvesAsACourtesy() =>
             Assert.Equal(NewYork.BaseUtcOffset, SheetTime.ResolveZone("Eastern Standard Time").BaseUtcOffset);
 
         [Fact]
-        public void An_empty_timezone_means_utc() => Assert.Equal(TimeZoneInfo.Utc, SheetTime.ResolveZone(null));
+        public void ResolveZone_IdIsNull_MeansUtc() => Assert.Equal(TimeZoneInfo.Utc, SheetTime.ResolveZone(null));
 
         [Fact]
-        public void An_unknown_timezone_says_what_to_do()
+        public void ResolveZone_IdIsUnknown_ThrowsSayingWhatToSet()
         {
             var exception = Assert.Throws<InvalidOperationException>(() => SheetTime.ResolveZone("Middle/Earth"));
 
@@ -120,7 +120,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Local_zone_reports_as_an_iana_id()
+        public void LocalIanaId_Always_ReportsAnIdSheetsAccepts()
         {
             // Windows would otherwise hand back "Eastern Standard Time", which Sheets rejects.
             var id = SheetTime.LocalIanaId();
@@ -155,7 +155,7 @@ namespace Noogen.Backlog.Tests
         [InlineData("de-DE")]   // comma decimal separator
         [InlineData("fr-FR")]
         [InlineData("en-US")]
-        public void Reads_numeric_cells_the_same_in_every_culture(string culture)
+        public void AsNumber_MachineCultureVaries_ReadsTheSameValue(string culture)
         {
             using var _ = Set(culture);
 
@@ -166,7 +166,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void A_blank_or_unparseable_cell_reads_as_null()
+        public void AsNumber_CellIsBlankOrUnparseable_ReturnsNull()
         {
             Assert.Null(SheetTime.AsNumber(null));
             Assert.Null(SheetTime.AsNumber(string.Empty));
@@ -176,7 +176,7 @@ namespace Noogen.Backlog.Tests
         [Theory]
         [InlineData("de-DE")]
         [InlineData("en-US")]
-        public async Task Cycle_time_is_identical_regardless_of_machine_culture(string culture)
+        public async Task ArchiveAsync_MachineCultureVaries_FreezesTheSameCycleTime(string culture)
         {
             using var _ = Set(culture);
 

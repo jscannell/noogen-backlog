@@ -88,7 +88,7 @@ namespace Noogen.Backlog
             if (string.IsNullOrEmpty(location.Ticket.DocId))
                 return string.Empty;
 
-            var raw = await _drive.ReadTextFileAsync(location.Ticket.DocId, cancellationToken);
+            var raw = await _drive.ReadDocAsync(location.Ticket.DocId, cancellationToken);
             return TicketDocument.Parse(raw).Body;
         }
 
@@ -119,13 +119,15 @@ namespace Noogen.Backlog
             };
 
             var body = TicketDocument.BuildInitialBody(ticket, request.Description, settings.Zone);
-            var fileName = $"{ticket.Id}-{Slug(ticket.Title)}.md";
 
-            ticket.DocId = await _drive.CreateTextFileAsync(
+            // No extension: a Google Doc has no file type in its name, and this one carries the
+            // name into the Docs tab a person reads it in.
+            var fileName = $"{ticket.Id}-{Slug(ticket.Title)}";
+
+            ticket.DocId = await _drive.CreateDocAsync(
                 settings.TicketsFolderId,
                 fileName,
                 TicketDocument.Serialize(ticket, body),
-                DriveGateway.MarkdownMimeType,
                 cancellationToken);
 
             ticket.DocUrl = await _drive.GetWebViewLinkAsync(ticket.DocId, cancellationToken);
@@ -138,8 +140,19 @@ namespace Noogen.Backlog
 
         public async Task<Ticket> UpdateAsync(string id, TicketEdit edit, CancellationToken cancellationToken = default)
         {
+            if (edit.Description is not null && string.IsNullOrWhiteSpace(edit.Description))
+                throw new ArgumentException("A description needs text. To empty one, edit the document itself.", nameof(edit));
+
             var location = await RequireAsync(id, cancellationToken);
             var ticket = location.Ticket;
+
+            // A row with no document is damage doctor reports, and rewriting a section of nothing
+            // would be the silent no-op an edit must never be.
+            if (edit.Description is not null && string.IsNullOrEmpty(ticket.DocId))
+            {
+                throw new InvalidOperationException(
+                    $"'{ticket.Id}' has no document in Drive, so there is no description to edit. Run 'backlog doctor'.");
+            }
 
             if (!string.IsNullOrWhiteSpace(edit.Title))
                 ticket.Title = edit.Title.Trim();
@@ -153,7 +166,7 @@ namespace Noogen.Backlog
             if (edit.Type.HasValue)
                 ticket.Type = edit.Type.Value;
 
-            return await SaveInPlaceAsync(location, null, cancellationToken);
+            return await SaveInPlaceAsync(location, null, edit.Description?.Trim(), cancellationToken);
         }
 
         public async Task<Ticket> ScoreAsync(string id, WsjfScore score, CancellationToken cancellationToken = default)
@@ -179,7 +192,7 @@ namespace Noogen.Backlog
             if (score.JobSize.HasValue)
                 ticket.Score.JobSize = score.JobSize;
 
-            return await SaveInPlaceAsync(location, null, cancellationToken);
+            return await SaveInPlaceAsync(location, null, null, cancellationToken);
         }
 
         public async Task<Ticket> AppendNoteAsync(string id, string note, CancellationToken cancellationToken = default)
@@ -188,7 +201,7 @@ namespace Noogen.Backlog
                 throw new ArgumentException("A note needs text.", nameof(note));
 
             var location = await RequireAsync(id, cancellationToken);
-            return await SaveInPlaceAsync(location, note.Trim(), cancellationToken);
+            return await SaveInPlaceAsync(location, note.Trim(), null, cancellationToken);
         }
 
         public async Task<Ticket> StartAsync(string id, string? owner, bool force, CancellationToken cancellationToken = default)
@@ -224,7 +237,7 @@ namespace Noogen.Backlog
                 ? $"started (WIP limit of {settings.WipLimit} overridden with --force)"
                 : "started";
 
-            await UpdateDocumentAsync(ticket, note, cancellationToken);
+            await UpdateDocumentAsync(ticket, note, null, cancellationToken);
             await _mover.MoveAsync(ticket, BacklogPhase.InProgress, cancellationToken);
 
             return ticket;
@@ -264,7 +277,7 @@ namespace Noogen.Backlog
                 ? $"blocked — {ticket.BlockedReason}"
                 : Vocabulary.ToWire(state);
 
-            return await SaveInPlaceAsync(location, note, cancellationToken);
+            return await SaveInPlaceAsync(location, note, null, cancellationToken);
         }
 
         public async Task<Ticket> ArchiveAsync(string id, Outcome outcome, string? note, CancellationToken cancellationToken = default)
@@ -292,7 +305,7 @@ namespace Noogen.Backlog
                 ? $"archived — {Vocabulary.ToWire(outcome)}"
                 : $"archived — {Vocabulary.ToWire(outcome)}: {note.Trim()}";
 
-            await UpdateDocumentAsync(ticket, activity, cancellationToken);
+            await UpdateDocumentAsync(ticket, activity, null, cancellationToken);
             await _mover.MoveAsync(ticket, BacklogPhase.Archive, cancellationToken);
 
             // Archive is the only transition that also moves the document. Items in progress keep
@@ -326,7 +339,7 @@ namespace Noogen.Backlog
             ticket.State = null;
             ticket.Updated = now;
 
-            await UpdateDocumentAsync(ticket, "restored to the backlog", cancellationToken);
+            await UpdateDocumentAsync(ticket, "restored to the backlog", null, cancellationToken);
             await _mover.MoveAsync(ticket, BacklogPhase.Backlog, cancellationToken);
 
             if (!string.IsNullOrEmpty(ticket.DocId) && archivedAt.HasValue)
@@ -384,7 +397,7 @@ namespace Noogen.Backlog
 
                     if (string.IsNullOrEmpty(ticket.DocId))
                     {
-                        report.Add(ticket.Id, "no-document", "Row has no doc_id, so the ticket has no markdown document.");
+                        report.Add(ticket.Id, "no-document", $"Row has no {SheetSchema.DriveFileId}, so the ticket has no document.");
                         continue;
                     }
 
@@ -393,7 +406,7 @@ namespace Noogen.Backlog
                     string raw;
                     try
                     {
-                        raw = await _drive.ReadTextFileAsync(ticket.DocId, cancellationToken);
+                        raw = await _drive.ReadDocAsync(ticket.DocId, cancellationToken);
                     }
                     catch (Exception exception)
                     {
@@ -460,7 +473,7 @@ namespace Noogen.Backlog
                     if (string.IsNullOrEmpty(row.Id) || string.IsNullOrEmpty(row.DocId))
                         continue;
 
-                    var raw = await _drive.ReadTextFileAsync(row.DocId, cancellationToken);
+                    var raw = await _drive.ReadDocAsync(row.DocId, cancellationToken);
                     var document = TicketDocument.Parse(raw).Ticket;
                     var times = await _drive.GetTimestampsAsync(row.DocId, cancellationToken);
 
@@ -521,33 +534,40 @@ namespace Noogen.Backlog
             await FindAsync(id, cancellationToken)
             ?? throw new KeyNotFoundException($"No ticket '{id}' on any tab. Run 'backlog list' to see the queue.");
 
-        async Task<Ticket> SaveInPlaceAsync(TicketLocation location, string? note, CancellationToken cancellationToken)
+        async Task<Ticket> SaveInPlaceAsync(TicketLocation location, string? note, string? description, CancellationToken cancellationToken)
         {
             location.Ticket.Updated = Now;
 
-            await UpdateDocumentAsync(location.Ticket, note, cancellationToken);
+            await UpdateDocumentAsync(location.Ticket, note, description, cancellationToken);
             await _index.WriteRowAsync(location.Table, location.Ticket, location.DataRowIndex, cancellationToken);
 
             return location.Ticket;
         }
 
-        async Task UpdateDocumentAsync(Ticket ticket, string? note, CancellationToken cancellationToken)
+        /// <summary>
+        /// Rewrites the heading and the bullets from the ticket, and passes the body through. The
+        /// two exceptions are both bounded by a heading a person can see: a note appended to the
+        /// Activity Log, and the Description section replaced outright. Everything else below the
+        /// bullets is the author's (invariant 9).
+        /// </summary>
+        async Task UpdateDocumentAsync(Ticket ticket, string? note, string? description, CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(ticket.DocId))
                 return;
 
             var settings = await GetSettingsAsync(cancellationToken);
-            var raw = await _drive.ReadTextFileAsync(ticket.DocId, cancellationToken);
-            var document = TicketDocument.Parse(raw);
+            var raw = await _drive.ReadDocAsync(ticket.DocId, cancellationToken);
+            var body = TicketDocument.Parse(raw).Body;
 
-            var body = string.IsNullOrWhiteSpace(note)
-                ? document.Body
-                : TicketDocument.AppendActivity(document.Body, ticket.Updated, note, settings.Zone);
+            if (description is not null)
+                body = TicketDocument.ReplaceSection(body, TicketDocument.DescriptionHeading, description);
 
-            await _drive.UpdateTextFileAsync(
+            if (!string.IsNullOrWhiteSpace(note))
+                body = TicketDocument.AppendActivity(body, ticket.Updated, note, settings.Zone);
+
+            await _drive.UpdateDocAsync(
                 ticket.DocId,
                 TicketDocument.Serialize(ticket, body),
-                DriveGateway.MarkdownMimeType,
                 cancellationToken);
         }
 

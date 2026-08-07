@@ -66,10 +66,10 @@ namespace Noogen.Backlog
 
         public void Validate()
         {
-            Validate(BusinessValue, "bv");
-            Validate(TimeCriticality, "tc");
-            Validate(RiskReductionOpportunityEnablement, "rroe");
-            Validate(JobSize, "size");
+            Validate(BusinessValue, SheetSchema.BusinessValue);
+            Validate(TimeCriticality, SheetSchema.TimeCriticality);
+            Validate(RiskReductionOpportunityEnablement, SheetSchema.RiskOpportunity);
+            Validate(JobSize, SheetSchema.JobSize);
         }
 
         public WsjfScore Clone() => new()

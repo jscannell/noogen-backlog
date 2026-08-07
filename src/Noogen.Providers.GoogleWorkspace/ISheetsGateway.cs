@@ -32,15 +32,28 @@ namespace Noogen.Providers.GoogleWorkspace
 
         Task EnsureTabAsync(string spreadsheetId, string tabName, CancellationToken cancellationToken = default);
 
+        Task RenameTabAsync(string spreadsheetId, string tabName, string newTabName, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Moves the named tabs to the front, left to right, in the order given. Names that the
+        /// spreadsheet does not carry are skipped, and tabs a human added keep their relative
+        /// order behind ours.
+        /// </summary>
+        Task SetTabOrderAsync(string spreadsheetId, IReadOnlyList<string> tabNames, CancellationToken cancellationToken = default);
+
         Task FreezeHeaderAsync(string spreadsheetId, string tabName, CancellationToken cancellationToken = default);
 
         Task HideColumnsAsync(string spreadsheetId, string tabName, int startColumnIndex, int endColumnIndex, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Applies a date-time number format to a column, so real datetime cells render as
-        /// readable local times in the spreadsheet's own timezone.
+        /// Applies a date-time number format to the given columns over a half-open row range, so
+        /// real datetime cells render as readable local times in the spreadsheet's own timezone.
+        /// A null <paramref name="endRowIndex"/> means every row from the start downwards.
+        ///
+        /// Takes a set of columns because both callers want several at once, and one batch keeps
+        /// the format arriving atomically rather than column by column.
         /// </summary>
-        Task SetColumnDateTimeFormatAsync(string spreadsheetId, string tabName, int columnIndex, string pattern, CancellationToken cancellationToken = default);
+        Task SetDateTimeFormatAsync(string spreadsheetId, string tabName, IReadOnlyList<int> columnIndexes, int startRowIndex, int? endRowIndex, string pattern, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// The spreadsheet's timezone (CLDR/IANA, e.g. America/New_York). Datetime cells are

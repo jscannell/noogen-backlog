@@ -3,7 +3,7 @@ namespace Noogen.Backlog.Tests
     public class TimeZoneIntegrationTests
     {
         [Fact]
-        public async Task Init_stamps_the_timezone_onto_the_spreadsheet_and_the_config_tab()
+        public async Task InitializeAsync_TimeZoneConfigured_StampsItOnBothTheSpreadsheetAndTheConfigTab()
         {
             var backlog = await TestBacklog.CreateAsync(timeZoneId: "America/New_York");
 
@@ -17,7 +17,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Timestamp_cells_are_numeric_serials_not_text()
+        public async Task AddAsync_NewTicket_WritesTimestampsAsNumericSerialsNotText()
         {
             var backlog = await TestBacklog.CreateAsync(timeZoneId: "America/New_York");
             var ticket = await backlog.AddAsync("Something");
@@ -29,19 +29,56 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Timestamp_columns_get_a_date_time_format_not_a_text_one()
+        public async Task InitializeAsync_Always_FormatsTheTimestampColumnsUnboundedBelowTheHeader()
         {
             var backlog = await TestBacklog.CreateAsync();
 
-            Assert.NotEmpty(backlog.Sheets.DateTimeFormattedColumns);
-            Assert.Contains(backlog.Sheets.DateTimeFormattedColumns, entry => entry.StartsWith("Backlog!"));
+            var call = backlog.Sheets.DateTimeFormats.Single(entry => entry.TabName == BacklogPhase.Backlog.TabName());
+
+            // Unbounded, so re-running init is also the repair for rows that arrived unformatted.
+            Assert.Equal(1, call.StartRowIndex);
+            Assert.Null(call.EndRowIndex);
+            Assert.Equal(SheetTime.DisplayPattern, call.Pattern);
+            Assert.NotEmpty(call.ColumnIndexes);
+        }
+
+        [Fact]
+        public async Task AddAsync_NewTicket_FormatsTheAppendedRowsOwnTimestampCells()
+        {
+            // Sheets *inserts* an appended row rather than writing into the formatted blank one
+            // below the data, and an inserted row carries no formatting — so the column-wide
+            // format from init never reaches it and Created/Updated render as five-digit serials.
+            var backlog = await TestBacklog.CreateAsync();
+            var ticket = await backlog.AddAsync("Something");
+
+            foreach (var column in new[] { SheetSchema.Created, SheetSchema.Updated })
+            {
+                var covering = backlog.DateTimeFormatsCovering(BacklogPhase.Backlog, ticket.Id, column);
+                Assert.Contains(covering, call => call.EndRowIndex.HasValue);
+            }
+        }
+
+        [Fact]
+        public async Task StartAsync_TicketMovesToAnotherTab_FormatsTheTimestampCellsOfTheRowItLandsIn()
+        {
+            // A transition is an append onto the destination tab, so it inherits the same problem.
+            var backlog = await TestBacklog.CreateAsync();
+            var ticket = await backlog.AddAsync("Something");
+
+            await backlog.Store.StartAsync(ticket.Id, "jason", false);
+
+            foreach (var column in new[] { SheetSchema.Created, SheetSchema.StartedAt })
+            {
+                var covering = backlog.DateTimeFormatsCovering(BacklogPhase.InProgress, ticket.Id, column);
+                Assert.Contains(covering, call => call.EndRowIndex.HasValue);
+            }
         }
 
         [Theory]
         [InlineData("UTC")]
         [InlineData("America/New_York")]
         [InlineData("Australia/Sydney")]
-        public async Task Instants_survive_a_write_and_read_in_any_configured_zone(string timeZoneId)
+        public async Task GetAsync_AnyConfiguredZone_ReturnsTheInstantThatWasWritten(string timeZoneId)
         {
             var created = new DateTimeOffset(2026, 8, 1, 12, 34, 0, TimeSpan.Zero);
             var backlog = await TestBacklog.CreateAsync(created, timeZoneId: timeZoneId);
@@ -54,7 +91,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Changing_the_timezone_does_not_move_existing_instants()
+        public async Task DoctorAsync_ConfiguredZoneNoLongerMatchesTheSpreadsheet_ReportsTheMismatchWithoutMovingInstants()
         {
             // The whole reason instants stay canonical: reinterpreting history on a config edit
             // would silently shift every lead and cycle time already recorded.
@@ -77,7 +114,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Doctor_is_quiet_when_the_two_timezones_agree()
+        public async Task DoctorAsync_BothTimeZonesAgree_ReportsNoMismatch()
         {
             var backlog = await TestBacklog.CreateAsync(timeZoneId: "Europe/London");
             await backlog.AddAsync("Something");
@@ -88,7 +125,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Activity_log_is_written_in_the_configured_zone()
+        public async Task AddAsync_TimeZoneConfigured_WritesTheActivityLogInThatZone()
         {
             var created = new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
             var backlog = await TestBacklog.CreateAsync(created, timeZoneId: "America/New_York");
@@ -104,7 +141,7 @@ namespace Noogen.Backlog.Tests
     public class ReindexTests
     {
         [Fact]
-        public async Task Takes_content_from_the_document_and_keeps_lifecycle_from_the_sheet()
+        public async Task ReindexAsync_AHumanEditedTheDocument_TakesContentFromItAndKeepsLifecycleFromTheSheet()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Original title");
@@ -116,7 +153,7 @@ namespace Noogen.Backlog.Tests
             var document = TicketDocument.Parse(backlog.Drive.ContentOf(ticket.DocId!));
             document.Ticket.Title = "Retitled by a human";
             document.Ticket.Score.BusinessValue = 13;
-            await backlog.Drive.UpdateTextFileAsync(ticket.DocId!, document.Serialize(), "text/markdown");
+            await backlog.Drive.UpdateDocAsync(ticket.DocId!, document.Serialize());
 
             await backlog.Store.ReindexAsync();
             var repaired = await backlog.Store.GetAsync(ticket.Id);
@@ -131,7 +168,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Takes_created_and_updated_from_drive_metadata()
+        public async Task ReindexAsync_Always_TakesCreatedAndUpdatedFromDriveMetadata()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Something");
@@ -150,14 +187,14 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public async Task Reports_drift_between_the_sheet_and_the_document()
+        public async Task DoctorAsync_DocumentAndRowDisagree_ReportsTheDrift()
         {
             var backlog = await TestBacklog.CreateAsync();
             var ticket = await backlog.AddAsync("Original title");
 
             var document = TicketDocument.Parse(backlog.Drive.ContentOf(ticket.DocId!));
             document.Ticket.Title = "Changed underneath";
-            await backlog.Drive.UpdateTextFileAsync(ticket.DocId!, document.Serialize(), "text/markdown");
+            await backlog.Drive.UpdateDocAsync(ticket.DocId!, document.Serialize());
 
             var report = await backlog.Store.DoctorAsync();
 

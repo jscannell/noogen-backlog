@@ -47,6 +47,15 @@ namespace Noogen.Backlog.Cli
                 Fail(command, "oauth-client-invalid", exception.Message);
                 return 3;
             }
+            catch (Exception exception) when (GoogleRateLimit.IsRateLimited(exception))
+            {
+                Fail(command, "rate-limited",
+                    "Google is rate limiting requests to this backlog, and the command kept being refused after " +
+                    "several waits. Nothing was half-written — a rate-limited request is rejected, not applied. " +
+                    "Wait a minute and run it again; if it persists, someone may be running a large 'reindex' or " +
+                    "'doctor' against the same backlog.");
+                return 4;
+            }
             catch (ArgumentException exception)
             {
                 Fail(command, "invalid-argument", exception.Message);
@@ -72,6 +81,11 @@ namespace Noogen.Backlog.Cli
                 return 0;
             }
 
+            // Before anything that costs a request or a sign-in: an option no verb reads used to
+            // be ignored, so a typo — or a flag that only exists on another verb — still reported
+            // success. See Verbs.
+            Verbs.Validate(command);
+
             var config = LocalConfig.Load();
             var commands = new Commands(config);
 
@@ -85,6 +99,8 @@ namespace Noogen.Backlog.Cli
                     return await commands.WhoAmIAsync(command);
                 case "init":
                     return await commands.InitAsync(command);
+                case "install-skill":
+                    return commands.InstallSkill(command);
                 case "list":
                     return await commands.ListAsync(command);
                 case "next":
@@ -140,13 +156,20 @@ namespace Noogen.Backlog.Cli
             return await resolver.ResolveAsync(config.ResolveAccount(account), GoogleWorkspaceScopes.All);
         }
 
+        /// <summary>
+        /// One handler for both services: a quota belongs to the account, and the two clients
+        /// spend the same one.
+        /// </summary>
+        internal static RateLimitRetryHandler CreateRetryHandler() => new(new ConsoleRetryListener());
+
         internal static async Task<IBacklogStore> CreateStoreAsync(LocalConfig config)
         {
             var credential = await ResolveCredentialAsync(config);
+            var retry = CreateRetryHandler();
 
             return new BacklogStore(
-                new SheetsGateway(new SheetsClientFactory(credential.Initializer)),
-                new DriveGateway(new DriveClientFactory(credential.Initializer)),
+                new SheetsGateway(new SheetsClientFactory(credential.Initializer, retry: retry)),
+                new DriveGateway(new DriveClientFactory(credential.Initializer, retry: retry)),
                 config.RequireSpreadsheetId());
         }
 
@@ -192,6 +215,7 @@ namespace Noogen.Backlog.Cli
                   new --title "..." [--type feature] [--area A] [--owner O]
                       [--bv N --tc N --rroe N --size N] [--description "..."]
                   edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
+                       [--description "..."]             Replaces the Description section
                   score <id> [--bv N] [--tc N] [--rroe N] [--size N]
                   note <id> --text "..."                  Append to the Activity Log
 
@@ -206,12 +230,16 @@ namespace Noogen.Backlog.Cli
 
                 MAINTENANCE
                   init --drive <id> [--timezone America/New_York]   One-time setup (idempotent)
+                  install-skill [--path DIR] [--force]    Write the Claude Code skill this tool
+                                                          carries into ~/.claude/skills
                   doctor                                  Check the index for drift and duplicates
                   reindex                                 Rebuild rows from their documents
 
                 Every command accepts --json for machine-readable output, which is always UTC.
                 Human output uses the backlog's configured timezone; --utc shows UTC instead.
-                WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20.
+                WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20. The score flags are
+                also spelled out: --business-value, --time-criticality, --risk-opportunity,
+                --job-size.
                 """);
         }
     }

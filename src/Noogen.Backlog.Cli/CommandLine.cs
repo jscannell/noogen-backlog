@@ -12,6 +12,7 @@ namespace Noogen.Backlog.Cli
         readonly Dictionary<string, string> _options = new(StringComparer.OrdinalIgnoreCase);
         readonly HashSet<string> _flags = new(StringComparer.OrdinalIgnoreCase);
         readonly List<string> _positionals = [];
+        readonly List<string> _names = [];
 
         CommandLine()
         {
@@ -20,6 +21,14 @@ namespace Noogen.Backlog.Cli
         public string Verb { get; private set; } = "help";
 
         public IReadOnlyList<string> Positionals => _positionals;
+
+        /// <summary>
+        /// Every option and flag name given, in the order typed. <see cref="Verbs.Validate"/>
+        /// checks these against what the verb reads — nothing else can see a name that no command
+        /// asks for. Order is kept so the error names the first mistake rather than an arbitrary
+        /// one.
+        /// </summary>
+        public IReadOnlyList<string> Names => _names;
 
         public bool Json => HasFlag("json");
 
@@ -47,9 +56,14 @@ namespace Noogen.Backlog.Cli
 
                 if (equals >= 0)
                 {
-                    command._options[name[..equals]] = name[(equals + 1)..];
+                    var value = name[(equals + 1)..];
+                    name = name[..equals];
+                    command._options[name] = value;
+                    command._names.Add(name);
                     continue;
                 }
+
+                command._names.Add(name);
 
                 var hasValue = i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal);
                 if (hasValue)
@@ -89,6 +103,14 @@ namespace Noogen.Backlog.Cli
 
             return parsed;
         }
+
+        /// <summary>
+        /// The short flag or its spelled-out form. The abbreviations are what anyone scoring a
+        /// stack of tickets actually types, but they are also the ones nobody remembers, so both
+        /// are accepted. The name given first is the one an error message names.
+        /// </summary>
+        public int? IntOption(string name, string alias) =>
+            Has(name) || !Has(alias) ? IntOption(name) : IntOption(alias);
 
         /// <summary>Parses a duration like `90d`, `12w`, or a bare day count.</summary>
         public DateTimeOffset? SinceOption(string name, DateTimeOffset now)

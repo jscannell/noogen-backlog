@@ -30,7 +30,7 @@ namespace Noogen.Backlog
 
     /// <summary>
     /// One kebab-case wire form shared by the Sheet's data-validation dropdowns, the ticket
-    /// frontmatter, and the CLI, so humans and agents cannot drift apart on vocabulary.
+    /// document, and the CLI, so humans and agents cannot drift apart on vocabulary.
     /// </summary>
     public static class Vocabulary
     {

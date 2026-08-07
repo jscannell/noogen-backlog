@@ -51,8 +51,8 @@ namespace Noogen.Backlog
                 Area = table.Value(dataRowIndex, SheetSchema.Area) ?? string.Empty,
                 Owner = table.Value(dataRowIndex, SheetSchema.Owner),
                 Phase = table.Phase,
-                DocId = table.Value(dataRowIndex, SheetSchema.DocId),
-                DocUrl = table.Value(dataRowIndex, SheetSchema.DocUrl)
+                DocId = table.Value(dataRowIndex, SheetSchema.DriveFileId),
+                DocUrl = table.Value(dataRowIndex, SheetSchema.DriveFileLink)
             };
 
             var type = table.Value(dataRowIndex, SheetSchema.Type);
@@ -60,10 +60,10 @@ namespace Noogen.Backlog
 
             ticket.Score = new WsjfScore
             {
-                BusinessValue = ReadInt(table, dataRowIndex, SheetSchema.Bv),
-                TimeCriticality = ReadInt(table, dataRowIndex, SheetSchema.Tc),
-                RiskReductionOpportunityEnablement = ReadInt(table, dataRowIndex, SheetSchema.Rroe),
-                JobSize = ReadInt(table, dataRowIndex, SheetSchema.Size)
+                BusinessValue = ReadInt(table, dataRowIndex, SheetSchema.BusinessValue),
+                TimeCriticality = ReadInt(table, dataRowIndex, SheetSchema.TimeCriticality),
+                RiskReductionOpportunityEnablement = ReadInt(table, dataRowIndex, SheetSchema.RiskOpportunity),
+                JobSize = ReadInt(table, dataRowIndex, SheetSchema.JobSize)
             };
 
             ticket.Rank = ReadInt(table, dataRowIndex, SheetSchema.Rank);
@@ -73,8 +73,8 @@ namespace Noogen.Backlog
             ticket.StartedAt = ReadTimestamp(table, dataRowIndex, SheetSchema.StartedAt);
             ticket.Outcome = Vocabulary.ParseOptional<Outcome>(table.Value(dataRowIndex, SheetSchema.Outcome), SheetSchema.Outcome);
             ticket.ArchivedAt = ReadTimestamp(table, dataRowIndex, SheetSchema.ArchivedAt);
-            ticket.LeadDays = ReadDouble(table, dataRowIndex, SheetSchema.LeadDays);
-            ticket.CycleDays = ReadDouble(table, dataRowIndex, SheetSchema.CycleDays);
+            ticket.LeadDays = ReadDouble(table, dataRowIndex, SheetSchema.LeadTime);
+            ticket.CycleDays = ReadDouble(table, dataRowIndex, SheetSchema.CycleTime);
 
             ticket.Created = ReadTimestamp(table, dataRowIndex, SheetSchema.Created) ?? default;
             ticket.Updated = ReadTimestamp(table, dataRowIndex, SheetSchema.Updated) ?? ticket.Created;
@@ -112,6 +112,7 @@ namespace Noogen.Backlog
             if (actualDataRowIndex != projectedDataRowIndex && table.Phase.UsesLiveFormulas())
                 await WriteRowAsync(table, ticket, actualDataRowIndex, cancellationToken);
 
+            await FormatTimestampsAsync(table, sheetRowIndex, cancellationToken);
             await SetTitleLinkAsync(table, ticket, actualDataRowIndex, cancellationToken);
             return actualDataRowIndex;
         }
@@ -127,6 +128,23 @@ namespace Noogen.Backlog
 
         public Task DeleteRowAsync(SheetTable table, int dataRowIndex, CancellationToken cancellationToken = default) =>
             _sheets.DeleteRowAsync(_spreadsheetId, table.Phase.TabName(), SheetTable.SheetRowIndex(dataRowIndex), cancellationToken);
+
+        /// <summary>
+        /// Reapplies the DATE_TIME format to the row that was just appended. Sheets *inserts* an
+        /// appended row rather than writing into the formatted blank one below the data, and an
+        /// inserted row carries no formatting — so the column-wide format init applied never
+        /// reaches it and its timestamps render as five-digit serials. Every row on every tab
+        /// arrives through here, so this is the one place that has to do it.
+        /// </summary>
+        Task FormatTimestampsAsync(SheetTable table, int sheetRowIndex, CancellationToken cancellationToken) =>
+            _sheets.SetDateTimeFormatAsync(
+                _spreadsheetId,
+                table.Phase.TabName(),
+                table.TimestampColumnIndexes(),
+                sheetRowIndex,
+                sheetRowIndex + 1,
+                SheetTime.DisplayPattern,
+                cancellationToken);
 
         async Task SetTitleLinkAsync(SheetTable table, Ticket ticket, int dataRowIndex, CancellationToken cancellationToken)
         {
@@ -147,6 +165,9 @@ namespace Noogen.Backlog
         /// Builds the row in the tab's own header order. Formula columns get formulas on the
         /// Backlog tab and frozen values everywhere else — the store never computes a value into
         /// a cell the Sheet owns.
+        ///
+        /// Walks the canonical headers, not the literal ones: a tab still headed with the old
+        /// short names would otherwise match no case below and be written back blank.
         /// </summary>
         internal IList<object> BuildRow(SheetTable table, Ticket ticket, int dataRowIndex)
         {
@@ -154,7 +175,7 @@ namespace Noogen.Backlog
             var live = table.Phase.UsesLiveFormulas();
             var values = new List<object>();
 
-            foreach (var header in table.Headers)
+            foreach (var header in table.CanonicalHeaders)
                 values.Add(BuildCell(table, ticket, header, rowNumber, live));
 
             return values;
@@ -174,15 +195,15 @@ namespace Noogen.Backlog
                     return EscapeUserText(ticket.Area);
                 case SheetSchema.Owner:
                     return EscapeUserText(ticket.Owner);
-                case SheetSchema.Bv:
+                case SheetSchema.BusinessValue:
                     return Number(ticket.Score.BusinessValue);
-                case SheetSchema.Tc:
+                case SheetSchema.TimeCriticality:
                     return Number(ticket.Score.TimeCriticality);
-                case SheetSchema.Rroe:
+                case SheetSchema.RiskOpportunity:
                     return Number(ticket.Score.RiskReductionOpportunityEnablement);
-                case SheetSchema.Size:
+                case SheetSchema.JobSize:
                     return Number(ticket.Score.JobSize);
-                case SheetSchema.Cod:
+                case SheetSchema.CostOfDelay:
                     return live ? CodFormula(table, rowNumber) : Number(ticket.Score.CostOfDelay);
                 case SheetSchema.Wsjf:
                     return live ? WsjfFormula(table, rowNumber) : Number(ticket.Score.Value);
@@ -200,17 +221,17 @@ namespace Noogen.Backlog
                     return ticket.Outcome.HasValue ? Vocabulary.ToWire(ticket.Outcome.Value) : string.Empty;
                 case SheetSchema.ArchivedAt:
                     return Timestamp(ticket.ArchivedAt);
-                case SheetSchema.LeadDays:
+                case SheetSchema.LeadTime:
                     return Number(ticket.LeadDays);
-                case SheetSchema.CycleDays:
+                case SheetSchema.CycleTime:
                     return Number(ticket.CycleDays);
                 case SheetSchema.Created:
                     return Timestamp(ticket.Created);
                 case SheetSchema.Updated:
                     return Timestamp(ticket.Updated);
-                case SheetSchema.DocId:
+                case SheetSchema.DriveFileId:
                     return ticket.DocId ?? string.Empty;
-                case SheetSchema.DocUrl:
+                case SheetSchema.DriveFileLink:
                     return ticket.DocUrl ?? string.Empty;
                 default:
                     // A column a human added. Leave it alone rather than blanking it.
@@ -220,17 +241,17 @@ namespace Noogen.Backlog
 
         internal static string CodFormula(SheetTable table, int rowNumber)
         {
-            var bv = table.ColumnLetter(SheetSchema.Bv);
-            var tc = table.ColumnLetter(SheetSchema.Tc);
-            var rroe = table.ColumnLetter(SheetSchema.Rroe);
+            var bv = table.ColumnLetter(SheetSchema.BusinessValue);
+            var tc = table.ColumnLetter(SheetSchema.TimeCriticality);
+            var rroe = table.ColumnLetter(SheetSchema.RiskOpportunity);
 
             return $"=IF(COUNT({bv}{rowNumber},{tc}{rowNumber},{rroe}{rowNumber})<3,\"\",{bv}{rowNumber}+{tc}{rowNumber}+{rroe}{rowNumber})";
         }
 
         internal static string WsjfFormula(SheetTable table, int rowNumber)
         {
-            var cod = table.ColumnLetter(SheetSchema.Cod);
-            var size = table.ColumnLetter(SheetSchema.Size);
+            var cod = table.ColumnLetter(SheetSchema.CostOfDelay);
+            var size = table.ColumnLetter(SheetSchema.JobSize);
 
             return $"=IF(OR({cod}{rowNumber}=\"\",{size}{rowNumber}=\"\",{size}{rowNumber}=0),\"\",ROUND({cod}{rowNumber}/{size}{rowNumber},2))";
         }

@@ -28,6 +28,18 @@ namespace Noogen.Backlog
         public const string TicketsFolderName = "tickets";
         public const string ArchiveFolderName = "archive";
 
+        /// <summary>
+        /// Left to right: the Kanban flow in the order work travels, then the settings nobody
+        /// reads day to day. Reapplied on every run, because a tab added later lands at the end.
+        /// </summary>
+        public static readonly IReadOnlyList<string> TabOrder =
+        [
+            BacklogPhase.Backlog.TabName(),
+            BacklogPhase.InProgress.TabName(),
+            BacklogPhase.Archive.TabName(),
+            SheetSchema.ConfigTabName
+        ];
+
         readonly IDriveGateway _drive;
         readonly ISheetsGateway _sheets;
 
@@ -54,6 +66,8 @@ namespace Noogen.Backlog
             {
                 spreadsheetId = await _drive.CreateSpreadsheetAsync(rootFolderId, IndexName, cancellationToken);
                 result.CreatedSpreadsheet = true;
+
+                await AdoptDefaultTabAsync(spreadsheetId, cancellationToken);
             }
 
             result.SpreadsheetId = spreadsheetId;
@@ -71,7 +85,25 @@ namespace Noogen.Backlog
             foreach (var phase in BacklogPhaseExtensions.All)
                 await EnsureLifecycleTabAsync(spreadsheetId, phase, cancellationToken);
 
+            await _sheets.SetTabOrderAsync(spreadsheetId, TabOrder, cancellationToken);
+
             return result;
+        }
+
+        /// <summary>
+        /// A newly created spreadsheet arrives carrying one default tab — "Sheet1" in English,
+        /// something else in another locale. Renaming it into the first tab we need leaves no
+        /// empty stray behind, and unlike deleting it, it cannot cost anyone a tab they meant to
+        /// keep. Anything other than a single unrecognised tab is left alone.
+        /// </summary>
+        async Task AdoptDefaultTabAsync(string spreadsheetId, CancellationToken cancellationToken)
+        {
+            var tabs = await _sheets.ListTabsAsync(spreadsheetId, cancellationToken);
+
+            if (tabs.Count != 1 || TabOrder.Contains(tabs[0], StringComparer.OrdinalIgnoreCase))
+                return;
+
+            await _sheets.RenameTabAsync(spreadsheetId, tabs[0], BacklogPhase.Backlog.TabName(), cancellationToken);
         }
 
         async Task EnsureLifecycleTabAsync(string spreadsheetId, BacklogPhase phase, CancellationToken cancellationToken)
@@ -94,12 +126,16 @@ namespace Noogen.Backlog
 
             // Timestamps are real datetime cells, so Sheets renders them in the spreadsheet's
             // timezone, sorts them numerically, and can filter on them. The pattern keeps the
-            // display unambiguous rather than locale-dependent.
-            foreach (var column in SheetSchema.TimestampColumns)
-            {
-                if (table.Has(column))
-                    await _sheets.SetColumnDateTimeFormatAsync(spreadsheetId, tabName, table.IndexOf(column), SheetTime.DisplayPattern, cancellationToken);
-            }
+            // display unambiguous rather than locale-dependent. Unbounded below the header, which
+            // also makes a re-run the repair for rows that ended up without the format.
+            await _sheets.SetDateTimeFormatAsync(
+                spreadsheetId,
+                tabName,
+                table.TimestampColumnIndexes(),
+                1,
+                null,
+                SheetTime.DisplayPattern,
+                cancellationToken);
 
             foreach (var column in SheetSchema.HiddenColumns)
             {

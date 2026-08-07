@@ -185,9 +185,11 @@ namespace Noogen.Backlog.Cli
 
             var credential = await Program.ResolveCredentialAsync(_config);
 
+            var retry = Program.CreateRetryHandler();
+
             var initializer = new BacklogInitializer(
-                new DriveGateway(new DriveClientFactory(credential.Initializer)),
-                new SheetsGateway(new SheetsClientFactory(credential.Initializer)));
+                new DriveGateway(new DriveClientFactory(credential.Initializer, retry: retry)),
+                new SheetsGateway(new SheetsClientFactory(credential.Initializer, retry: retry)));
 
             var result = await initializer.RunAsync(driveId, _config.SpreadsheetId, timeZoneId);
 
@@ -208,6 +210,80 @@ namespace Noogen.Backlog.Cli
             Output.WriteLine($"  timezone  {result.TimeZoneId}");
             Output.WriteLine($"  config    {LocalConfig.Path}");
             return 0;
+        }
+
+        /// <summary>
+        /// Unpacks the Claude Code skill this tool carries. See <see cref="EmbeddedSkill"/> for
+        /// why it rides inside the binary rather than being distributed alongside it.
+        /// </summary>
+        public int InstallSkill(CommandLine command)
+        {
+            var root = command.Option("path") ?? LocalConfig.SkillsDirectory;
+            var installation = EmbeddedSkill.Install(root, command.HasFlag("force"));
+
+            if (!installation.Applied)
+                return ReportSkillConflict(command, installation);
+
+            if (command.Json)
+            {
+                Output.WriteJson(new Dictionary<string, object?>
+                {
+                    ["name"] = EmbeddedSkill.Name,
+                    ["path"] = installation.Path,
+                    ["upToDate"] = installation.UpToDate,
+                    ["written"] = installation.Written,
+                    ["removed"] = installation.Removed
+                });
+                return 0;
+            }
+
+            if (installation.UpToDate)
+            {
+                Output.WriteLine($"The {EmbeddedSkill.Name} skill at {installation.Path} is already up to date.");
+                return 0;
+            }
+
+            Output.WriteLine($"Installed the {EmbeddedSkill.Name} skill to {installation.Path}");
+
+            foreach (var file in installation.Written)
+                Output.WriteLine($"  + {file}");
+
+            foreach (var file in installation.Removed)
+                Output.WriteLine($"  - {file}   (not part of this version)");
+
+            Output.WriteLine();
+            Output.WriteLine("Claude Code loads it in the next session you start.");
+            return 0;
+        }
+
+        /// <summary>
+        /// Mirrors the error shape <see cref="Program"/> writes, so the machine contract is the
+        /// same whether the refusal comes from here or from a thrown exception.
+        /// </summary>
+        static int ReportSkillConflict(CommandLine command, SkillInstallation installation)
+        {
+            var message =
+                $"The skill at {installation.Path} is not the one in this tool. " +
+                "Re-run with --force to replace it.";
+
+            if (command.Json)
+            {
+                Output.WriteJson(new Dictionary<string, object?>
+                {
+                    ["kind"] = "skill-differs",
+                    ["error"] = message,
+                    ["path"] = installation.Path,
+                    ["differences"] = installation.Differences
+                });
+                return 1;
+            }
+
+            Output.WriteError($"error (skill-differs): {message}");
+
+            foreach (var difference in installation.Differences)
+                Output.WriteError($"  {difference.Kind,-8} {difference.Path}");
+
+            return 1;
         }
 
         // --- queries ---
@@ -357,7 +433,7 @@ namespace Noogen.Backlog.Cli
 
             Output.WriteLine($"{ticket.Id}  [{Vocabulary.ToWire(ticket.Phase)}]  {ticket.Title}");
             Output.WriteLine($"  type {Vocabulary.ToWire(ticket.Type)}   area {Output.Text(ticket.Area)}   owner {Output.Text(ticket.Owner)}");
-            Output.WriteLine($"  wsjf {Output.Number(ticket.Score.Value)} (bv {Output.Number(ticket.Score.BusinessValue)}, tc {Output.Number(ticket.Score.TimeCriticality)}, rroe {Output.Number(ticket.Score.RiskReductionOpportunityEnablement)}, size {Output.Number(ticket.Score.JobSize)})");
+            Output.WriteLine($"  wsjf {Output.Number(ticket.Score.Value)} (business value {Output.Number(ticket.Score.BusinessValue)}, time criticality {Output.Number(ticket.Score.TimeCriticality)}, risk & opportunity {Output.Number(ticket.Score.RiskReductionOpportunityEnablement)}, job size {Output.Number(ticket.Score.JobSize)})");
 
             if (ticket.State.HasValue)
                 Output.WriteLine($"  state {Vocabulary.ToWire(ticket.State.Value)}{(ticket.BlockedReason is null ? string.Empty : $" — {ticket.BlockedReason}")}");
@@ -402,19 +478,16 @@ namespace Noogen.Backlog.Cli
             var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            if (command.Has("status") || command.Has("phase"))
-            {
-                throw new UsageException(
-                    "There is no --status flag: the tab a ticket lives on is its state. " +
-                    "Use 'backlog start', 'block', 'unblock', 'review', 'archive', or 'restore'.");
-            }
-
             var edit = new TicketEdit
             {
                 Title = command.Option("title"),
                 Area = command.Option("area"),
                 Owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : null,
-                Type = command.Has("type") ? Vocabulary.Parse<TicketType>(command.RequireOption("type"), "type") : null
+                Type = command.Has("type") ? Vocabulary.Parse<TicketType>(command.RequireOption("type"), "type") : null,
+
+                // RequireOption, not Option: a bare `--description` parses as a valueless flag, and
+                // reading it as "no change" would be the silent no-op this flag exists to end.
+                Description = command.Has("description") ? command.RequireOption("description") : null
             };
 
             var ticket = await store.UpdateAsync(id, edit);
@@ -555,10 +628,10 @@ namespace Noogen.Backlog.Cli
 
         static WsjfScore ReadScore(CommandLine command) => new()
         {
-            BusinessValue = command.IntOption("bv"),
-            TimeCriticality = command.IntOption("tc"),
-            RiskReductionOpportunityEnablement = command.IntOption("rroe"),
-            JobSize = command.IntOption("size")
+            BusinessValue = command.IntOption("bv", "business-value"),
+            TimeCriticality = command.IntOption("tc", "time-criticality"),
+            RiskReductionOpportunityEnablement = command.IntOption("rroe", "risk-opportunity"),
+            JobSize = command.IntOption("size", "job-size")
         };
 
         static int Report(CommandLine command, Ticket ticket, string message)

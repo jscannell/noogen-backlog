@@ -26,13 +26,23 @@ namespace Noogen.Providers.GoogleWorkspace
     {
         readonly Lazy<TService> _service;
 
-        protected GoogleClientFactory(IConfigurableHttpClientInitializer credential, string applicationName)
+        protected GoogleClientFactory(IConfigurableHttpClientInitializer credential, string applicationName, RateLimitRetryHandler? retry = null)
         {
-            _service = new Lazy<TService>(() => Create(new BaseClientService.Initializer
+            _service = new Lazy<TService>(() =>
             {
-                HttpClientInitializer = credential,
-                ApplicationName = applicationName
-            }));
+                var service = Create(new BaseClientService.Initializer
+                {
+                    HttpClientInitializer = credential,
+                    ApplicationName = applicationName
+                });
+
+                // Attached here rather than left to each call site: a quota is a property of the
+                // account, not of one verb, so every request Google can refuse gets the same
+                // treatment. See RateLimitRetryHandler for why retrying a write is safe.
+                (retry ?? new RateLimitRetryHandler()).Attach(service);
+
+                return service;
+            });
         }
 
         protected abstract TService Create(BaseClientService.Initializer initializer);
@@ -42,8 +52,8 @@ namespace Noogen.Providers.GoogleWorkspace
 
     public class DriveClientFactory : GoogleClientFactory<DriveService>, IDriveClientFactory
     {
-        public DriveClientFactory(IConfigurableHttpClientInitializer credential, string applicationName = "Noogen.Backlog")
-            : base(credential, applicationName)
+        public DriveClientFactory(IConfigurableHttpClientInitializer credential, string applicationName = "Noogen.Backlog", RateLimitRetryHandler? retry = null)
+            : base(credential, applicationName, retry)
         {
         }
 
@@ -54,8 +64,8 @@ namespace Noogen.Providers.GoogleWorkspace
 
     public class SheetsClientFactory : GoogleClientFactory<SheetsService>, ISheetsClientFactory
     {
-        public SheetsClientFactory(IConfigurableHttpClientInitializer credential, string applicationName = "Noogen.Backlog")
-            : base(credential, applicationName)
+        public SheetsClientFactory(IConfigurableHttpClientInitializer credential, string applicationName = "Noogen.Backlog", RateLimitRetryHandler? retry = null)
+            : base(credential, applicationName, retry)
         {
         }
 

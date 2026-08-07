@@ -73,6 +73,41 @@ namespace Noogen.Backlog.Tests
         /// <summary>A store with no cached settings, for asserting on a changed Config tab.</summary>
         public BacklogStore FreshStore() => new(Sheets, Drive, SpreadsheetId, Clock);
 
+        /// <summary>
+        /// Rewrites every header row the way a backlog created before the columns were spelled out
+        /// still has it. Nothing in the product does this — it is how the tests get their hands on
+        /// an old spreadsheet, which we read as-is rather than relabelling.
+        /// </summary>
+        public async Task UseLegacyHeadersAsync()
+        {
+            var legacy = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [SheetSchema.BusinessValue] = "bv",
+                [SheetSchema.TimeCriticality] = "tc",
+                [SheetSchema.RiskOpportunity] = "rroe",
+                [SheetSchema.JobSize] = "size",
+                [SheetSchema.CostOfDelay] = "cod",
+                [SheetSchema.LeadTime] = "lead_days",
+                [SheetSchema.CycleTime] = "cycle_days",
+                [SheetSchema.DriveFileId] = "doc_id",
+                [SheetSchema.DriveFileLink] = "doc_url"
+            };
+
+            foreach (var phase in BacklogPhaseExtensions.All)
+            {
+                var headers = Sheets.Rows(phase.TabName())[0]
+                    .Select(cell => cell?.ToString() ?? string.Empty)
+                    .Select(header => legacy.TryGetValue(header, out var old) ? old : header.ToLowerInvariant().Replace(' ', '_'))
+                    .Cast<object>()
+                    .ToList();
+
+                await Sheets.UpdateValuesAsync(
+                    SpreadsheetId,
+                    Providers.GoogleWorkspace.A1.Anchor(phase.TabName(), 0, 0),
+                    [headers]);
+            }
+        }
+
         public Task<Ticket> AddAsync(string title, int? bv = 8, int? tc = 3, int? rroe = 2, int? size = 5, string area = "agent", string? owner = null) =>
             Store.CreateAsync(new NewTicket
             {
@@ -88,11 +123,19 @@ namespace Noogen.Backlog.Tests
                 }
             });
 
+        /// <summary>The header row resolved to the schema's names, so a cell lookup works whether
+        /// the tab is headed the current way or the legacy one.</summary>
+        List<string> HeadersOf(BacklogPhase phase) =>
+            Sheets.Rows(phase.TabName())[0]
+                .Select(cell => cell?.ToString() ?? string.Empty)
+                .Select(header => SheetSchema.Canonical(header) ?? header)
+                .ToList();
+
         /// <summary>The cell as stored — a double for a serial, a string for text or a formula.</summary>
         public object? RawCell(BacklogPhase phase, string ticketId, string column)
         {
             var rows = Sheets.Rows(phase.TabName());
-            var headers = rows[0].Select(cell => cell?.ToString() ?? string.Empty).ToList();
+            var headers = HeadersOf(phase);
 
             var idIndex = headers.IndexOf(SheetSchema.Id);
             var columnIndex = headers.IndexOf(column);
@@ -111,7 +154,7 @@ namespace Noogen.Backlog.Tests
         public string CellText(BacklogPhase phase, string ticketId, string column)
         {
             var rows = Sheets.Rows(phase.TabName());
-            var headers = rows[0].Select(cell => cell?.ToString() ?? string.Empty).ToList();
+            var headers = HeadersOf(phase);
 
             var idIndex = headers.IndexOf(SheetSchema.Id);
             var columnIndex = headers.IndexOf(column);
@@ -127,5 +170,61 @@ namespace Noogen.Backlog.Tests
         }
 
         public int RowCount(BacklogPhase phase) => Math.Max(0, Sheets.Rows(phase.TabName()).Count - 1);
+
+        /// <summary>
+        /// Writes one cell of a ticket's row directly, which is how a test gets its hands on a row
+        /// damaged the way a human editing the Sheet could damage it. Nothing in the product does
+        /// this — the store always writes a whole row.
+        /// </summary>
+        public async Task SetCellAsync(BacklogPhase phase, string ticketId, string column, object value)
+        {
+            var rows = Sheets.Rows(phase.TabName());
+            var headers = HeadersOf(phase);
+
+            var idIndex = headers.IndexOf(SheetSchema.Id);
+            var columnIndex = headers.IndexOf(column);
+
+            for (var i = 1; i < rows.Count; i++)
+            {
+                if (idIndex < rows[i].Count && string.Equals(rows[i][idIndex]?.ToString(), ticketId, StringComparison.OrdinalIgnoreCase))
+                {
+                    await Sheets.UpdateValuesAsync(
+                        SpreadsheetId,
+                        Providers.GoogleWorkspace.A1.Cell(phase.TabName(), i, columnIndex),
+                        [[value]]);
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException($"No row for '{ticketId}' on the {phase.TabName()} tab.");
+        }
+
+        /// <summary>
+        /// The DATE_TIME formats that reach a ticket's cell. A number format is not cell content,
+        /// so this asks the recorded calls rather than the grid — and it returns them all, because
+        /// what matters is <em>which</em> call covers the cell: a column-wide one does not survive
+        /// a row being inserted underneath it, and a row-scoped one is the whole point.
+        /// </summary>
+        public IReadOnlyList<DateTimeFormatCall> DateTimeFormatsCovering(BacklogPhase phase, string ticketId, string column)
+        {
+            var rows = Sheets.Rows(phase.TabName());
+            var headers = HeadersOf(phase);
+
+            var idIndex = headers.IndexOf(SheetSchema.Id);
+            var columnIndex = headers.IndexOf(column);
+
+            for (var i = 1; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                if (idIndex >= row.Count || !string.Equals(row[idIndex]?.ToString(), ticketId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                return Sheets.DateTimeFormats
+                    .Where(call => string.Equals(call.TabName, phase.TabName(), StringComparison.OrdinalIgnoreCase) && call.Covers(i, columnIndex))
+                    .ToList();
+            }
+
+            return [];
+        }
     }
 }

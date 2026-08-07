@@ -3,7 +3,7 @@ namespace Noogen.Backlog.Tests
     public class WsjfScoreTests
     {
         [Fact]
-        public void Computes_cost_of_delay_and_wsjf()
+        public void Value_EveryDimensionScored_DividesCostOfDelayByJobSize()
         {
             var score = new WsjfScore
             {
@@ -19,7 +19,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Rounds_to_two_decimals()
+        public void Value_DivisionIsNotExact_RoundsToTwoDecimals()
         {
             var score = new WsjfScore
             {
@@ -33,7 +33,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Is_null_until_every_dimension_is_scored()
+        public void Value_ADimensionIsUnscored_IsNull()
         {
             var score = new WsjfScore { BusinessValue = 8, TimeCriticality = 3 };
 
@@ -43,7 +43,7 @@ namespace Noogen.Backlog.Tests
         }
 
         [Fact]
-        public void Job_size_of_zero_does_not_divide_by_zero()
+        public void Value_JobSizeIsZero_IsNullRatherThanDividingByZero()
         {
             var score = new WsjfScore
             {
@@ -64,17 +64,17 @@ namespace Noogen.Backlog.Tests
         [InlineData(8)]
         [InlineData(13)]
         [InlineData(20)]
-        public void Accepts_modified_fibonacci(int value) => WsjfScore.Validate(value, "bv");
+        public void Validate_ValueIsOnTheModifiedFibonacciScale_Accepts(int value) => WsjfScore.Validate(value, "bv");
 
         [Theory]
         [InlineData(4)]
         [InlineData(0)]
         [InlineData(21)]
         [InlineData(-1)]
-        public void Rejects_off_scale_values(int value) =>
+        public void Validate_ValueIsOffTheScale_Throws(int value) =>
             Assert.Throws<ArgumentOutOfRangeException>(() => WsjfScore.Validate(value, "bv"));
 
         [Fact]
-        public void Null_is_allowed_because_an_unscored_item_is_legitimate() => WsjfScore.Validate(null, "bv");
+        public void Validate_ValueIsNull_AcceptsBecauseAnUnscoredItemIsLegitimate() => WsjfScore.Validate(null, "bv");
     }
 }

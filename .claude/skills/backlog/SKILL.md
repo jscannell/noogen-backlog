@@ -5,9 +5,9 @@ description: Read and update the Noogen company backlog — a WSJF-prioritised K
 
 # Noogen backlog
 
-Work items live in a Google Drive shared drive: one markdown document per ticket, indexed by a
-Google Sheet. Reach everything through the `backlog` CLI — never edit the Sheet directly, and
-never hand-write a ticket document.
+Work items live in a Google Drive shared drive: one Google Doc per ticket, written and read as
+markdown, indexed by a Google Sheet. Reach everything through the `backlog` CLI — never edit the
+Sheet directly, and never hand-write a ticket document.
 
 Add `--json` to any command for machine-readable output. Prefer it when you need to parse.
 
@@ -32,9 +32,12 @@ backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
             [--bv N --tc N --rroe N --size N] [--description "..."]
-backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
+backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...] [--description "..."]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."                  # appends to the Activity Log
+
+# score flags also accept their spelled-out forms, which is what the Sheet's
+# columns are called: --business-value --time-criticality --risk-opportunity --job-size
 
 backlog start <id> [--owner me] [--force]       # Backlog -> In Progress
 backlog block <id> --reason "..." | backlog unblock <id> | backlog review <id>
@@ -49,17 +52,38 @@ backlog doctor | backlog reindex                # health check / repair
 Human output renders in the backlog's configured timezone; `--utc` opts out. **`--json` is always
 UTC** — parse that, and convert for display rather than assuming the human-readable form.
 
-Ticket documents deliberately carry **no timestamps, phase, or work state** in their frontmatter.
-Those live in the Sheet, in Drive's own file metadata, and narratively in the Activity Log. If
-asked when something started, use `backlog show <id>` rather than reading the document.
+Ticket documents deliberately carry **no timestamps, phase, or work state**. Those live in the
+Sheet, in Drive's own file metadata, and narratively in the Activity Log. If asked when something
+started, use `backlog show <id>` rather than reading the document.
+
+## The ticket document
+
+An `# <ID> — <Title>` heading, then `- **Key:** value` bullets for type, area, owner and the four
+scores, then the prose sections. The heading is the only place the id and title live.
+
+`backlog show <id>` prints the prose from the first section onwards — the heading and the bullets
+would only repeat the summary line it already prints above them.
+
+**The CLI writes the heading and the bullets; below them it only ever touches two sections.**
+`edit --description "..."` replaces the `## Description` section, and `note` appends to the
+Activity Log. Everything else — Acceptance Criteria, Notes, anything a person added — is theirs,
+so to change one of those, give them the document URL from `backlog show <id>` to edit in Docs.
+
+`--description` **replaces**, so read the current text with `backlog show <id>` first and pass the
+whole new section, not just the part that changed. `--description ""` is refused rather than
+treated as "empty it". The edit writes no Activity Log entry; if the change is worth recording,
+follow it with `note`.
+
+Every verb rejects an option it does not read (exit 2, kind `usage`), so a flag borrowed from
+another verb fails loudly rather than being ignored.
 
 ## Rules
 
 1. **Archive, never delete.** `backlog archive` moves the row and the document. Nothing is ever
    trashed. If asked to delete a ticket, archive it as `cancelled` or `duplicate` instead.
 
-2. **Go through the CLI.** The Sheet owns the `cod`, `wsjf`, and `rank` formulas. Writing those
-   cells by hand breaks the index. `backlog doctor` detects the damage; `backlog reindex` repairs it.
+2. **Go through the CLI.** The Sheet owns the `Cost of Delay`, `WSJF`, and `Rank` formulas. Writing
+   those cells by hand breaks the index. `backlog doctor` detects the damage; `backlog reindex` repairs it.
    Editing a ticket *document* by hand is fine and expected — it holds only human-editable
    content, and `reindex` folds those edits back into the index.
 
@@ -91,6 +115,11 @@ create it unscored (it will sort last) and say it needs scoring.
 Each person signs in as themselves with `backlog login`, which opens a browser once. If a command
 fails with `not-signed-in`, tell them to run it — do not attempt to authenticate on their behalf,
 and never read, copy, print, or move anything under the credentials directory.
+
+A command may pause and print `Google is rate limiting requests; waiting …` on stderr. That is
+normal — it retries on its own. If one still fails with `rate-limited`, nothing was written: a
+throttled request is rejected, not half-applied. Wait a minute and run it again rather than
+retrying in a tight loop, and never work around it by falling back to editing the Sheet directly.
 
 If a command reports no backlog is configured, someone needs to run
 `backlog init --drive <sharedDriveId> --timezone <IANA>` once. See the repo README for the

@@ -28,6 +28,17 @@ namespace Noogen.Backlog
         public string? Owner { get; set; }
 
         public TicketType? Type { get; set; }
+
+        /// <summary>
+        /// New text for the document's Description section, or null to leave the body alone.
+        ///
+        /// The only prose the store will rewrite, and only that one section — see
+        /// <see cref="TicketDocument.ReplaceSection"/>. Blank is refused rather than treated as
+        /// "clear it": every other field here is a scalar the Sheet also holds, so blanking one
+        /// loses nothing, while blanking this one throws away writing with no CLI way back.
+        /// Google Docs' own revision history is what recovers an overwrite.
+        /// </summary>
+        public string? Description { get; set; }
     }
 
     public class TicketFilter

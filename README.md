@@ -1,8 +1,8 @@
 # Noogen backlog
 
-A lightweight, company-wide work-item tracker: **markdown tickets in a Google Drive shared drive,
+A lightweight, company-wide work-item tracker: **one Google Doc per ticket in a Drive shared drive,
 indexed by a Google Sheet, prioritised with WSJF, run as Kanban.** Readable and editable by humans
-in Drive; queryable and writable by agents through the `backlog` CLI.
+in Docs; queryable and writable by agents through the `backlog` CLI.
 
 Completed work is **archived, never deleted**.
 
@@ -19,13 +19,42 @@ Work moves through three Kanban columns, and **the tab a ticket lives on is its 
 | tab | phase | ranked? | holds |
 |---|---|---|---|
 | `Backlog` | not started | **yes — the WSJF queue** | everything unstarted; unscored sorts last |
-| `In Progress` | pulled, not finished | no | `state` ∈ `in-progress`, `in-review`, `blocked` |
-| `Archive` | terminal | no | `outcome` ∈ `done`, `cancelled`, `duplicate` |
+| `In Progress` | pulled, not finished | no | `State` ∈ `in-progress`, `in-review`, `blocked` |
+| `Archive` | terminal | no | `Outcome` ∈ `done`, `cancelled`, `duplicate` |
 
 Because the tab is the state, "is this ranked?" is a property of *where the row lives* rather than
-a flag anyone has to maintain. `cod`, `wsjf`, and `rank` are live Sheet formulas on `Backlog`
-only; once work starts the scores freeze as static values — a historical record for calibrating
-estimates, never recomputed.
+a flag anyone has to maintain. `Cost of Delay`, `WSJF`, and `Rank` are live Sheet formulas on
+`Backlog` only; once work starts the scores freeze as static values — a historical record for
+calibrating estimates, never recomputed.
+
+### The columns
+
+The Sheet is meant to be read and edited by hand, so the headers are words rather than
+abbreviations. `WSJF` keeps its name — it is the term of art.
+
+| column | what it is |
+|---|---|
+| `ID` | the ticket id, e.g. `NG-0007` |
+| `Title` | links to the ticket document |
+| `Type`, `Area`, `Owner` | classification |
+| `Business Value` | what the organisation or its users gain |
+| `Time Criticality` | how fast the value decays |
+| `Risk & Opportunity` | risk reduction and opportunity enablement |
+| `Job Size` | effort, the denominator |
+| `Cost of Delay` | `Business Value + Time Criticality + Risk & Opportunity` |
+| `WSJF` | `Cost of Delay / Job Size` |
+| `Rank` | queue position, `Backlog` only |
+| `State`, `Blocked Reason`, `Blocked At`, `Started At` | `In Progress` only |
+| `Outcome`, `Archived At`, `Lead Time (days)`, `Cycle Time (days)` | `Archive` only |
+| `Created`, `Updated` | datetime cells; see [Times](#times) |
+| `Drive File ID`, `Drive File Link` | hidden. Drive's own handle for the ticket document, and a cached link so the `Title` cell can be hyperlinked without a Drive round-trip |
+
+Columns resolve by header name, never by position, so reordering or adding your own is safe. A
+backlog created before the columns were spelled out still answers to the short names it has —
+`bv`, `tc`, `rroe`, `size`, `cod`, `lead_days`, `cycle_days`, `doc_id`, `doc_url` — and nothing
+relabels an existing header row. Ticket documents use the same name resolution, so a field you
+label `job size` or `bv` by hand is understood; unlike the header row, a document is rewritten
+with the spelled-out names on its next save.
 
 Drive layout:
 
@@ -33,14 +62,78 @@ Drive layout:
 Noogen Backlog/                     (shared drive)
 ├── Backlog Index                   Google Sheet — Backlog / In Progress / Archive / Config
 ├── tickets/
-│   └── NG-0007-wsjf-index-tool.md
+│   └── NG-0007-wsjf-index-tool     Google Doc
 └── archive/2026/Q3/
-    └── NG-0003-slack-thread-replay.md
+    └── NG-0003-slack-thread-replay Google Doc
 ```
 
-The `title` cell in the Sheet links to the ticket document. It is a rich-text link rather than a
+The `Title` cell in the Sheet links to the ticket document. It is a rich-text link rather than a
 `HYPERLINK()` formula, so the stored cell value stays the plain title and ordinary reads are
 unaffected.
+
+## The ticket document
+
+Markdown is the format; a **Google Doc** is the file. The CLI uploads markdown and Drive converts
+it on the way in, so clicking a title in the Sheet opens the Docs editor with the ticket rendered —
+headings as headings, fields as a bullet list — rather than a Drive preview of raw text. Reads go
+the other way, exporting the Doc back to markdown.
+
+The cost of that is worth knowing: Docs stores paragraphs and lists, not markdown, so an export is
+Docs' rendering of the document in its own style rather than a byte-for-byte copy of what was
+written. Hard-wrapped lines come back as one paragraph, `_italic_` as `*italic*`, and some
+punctuation backslash-escaped. That drift is stable, not cumulative — it happens on the first save
+and then stops. What the CLI generates is already written in Docs' style, so a new ticket's body
+comes back as it went in apart from a backslash on the timezone offset in the Activity Log — an
+export artifact that never appears in the document a person reads. The CLI rewrites the heading
+and the bullet block on every save, so the fields
+always come back to the canonical form; the prose below them is copied through exactly as Docs
+returned it, never "cleaned up".
+
+A heading, the fields a person edits, then the prose:
+
+```markdown
+# NG-0007 — WSJF index tool
+
+- **Type:** feature
+- **Area:** agent
+- **Owner:** jason
+- **Business Value:** 8
+- **Time Criticality:** 3
+- **Risk & Opportunity:** 2
+- **Job Size:** 5
+
+## Description
+
+…
+
+## Acceptance Criteria
+
+- [ ] …
+
+## Notes
+
+## Activity Log
+
+- 2026-08-01 09:00 -04:00 — created
+```
+
+Every part of it renders. Docs is where someone who does not use the CLI reads a ticket, and a
+`---` frontmatter block does not survive the conversion the way it would on a code host — it showed
+up as literal text or vanished into a horizontal rule, so the first thing the reader saw was
+plumbing.
+
+**The heading is the only home of the id and the title.** They used to sit in frontmatter *and* in
+a heading that nothing rewrote, so `backlog edit --title` left the heading stale permanently and no
+check could see it: `doctor` compares the Sheet against the metadata, and those two agreed.
+
+Everything below the bullets is yours. The CLI regenerates the heading and the bullet block on
+every write and copies the rest through untouched — including a sentence typed straight under the
+title, which is body, not a field. An unrecognised bullet round-trips rather than being eaten, so
+`- **epic:** platform-rebrand` survives.
+
+Editing a document by hand is expected; `backlog reindex` folds those edits back into the Sheet.
+What is deliberately *not* here is timestamps, phase, and work state — see
+[the invariants](CLAUDE.md).
 
 ## Times
 
@@ -60,14 +153,49 @@ a double cannot represent most instants exactly.
 
 ## Install
 
+Given the `.nupkg` (see [Distributing](#distributing) for where it comes from):
+
 ```bash
-dotnet pack src/Noogen.Backlog.Cli/Noogen.Backlog.Cli.csproj -c Release
-dotnet tool install -g --add-source ./artifacts Noogen.Backlog.Cli
-backlog help
+dotnet tool install -g --add-source <folder-holding-the-nupkg> Noogen.Backlog.Cli
+backlog install-skill      # writes the Claude Code skill into ~/.claude/skills
+backlog login              # opens a browser, once
 ```
 
 Installing globally is deliberate — the backlog spans repos, so the tool should not live inside
 any one of them.
+
+`install-skill` unpacks the skill the tool carries. Pass `--path <dir>` to install it somewhere
+else — a project's `.claude/skills`, say. It refuses if what is already there differs from what
+the tool carries, listing the files, and `--force` replaces them; nothing under `~/.claude` gets
+overwritten without you saying so. Claude Code loads the skill in the next session you start.
+
+## Distributing
+
+One artifact carries both halves. The build embeds the skill from `.claude/skills/backlog` into
+the CLI assembly, so the `.nupkg` holds the binary *and* the skill, and nobody can end up with one
+updated and the other stale.
+
+```powershell
+./scripts/deploy.ps1                  # test, pack, install globally, install the skill
+./scripts/deploy.ps1 -Version 1.2.0   # the same, but a version worth handing to someone
+```
+
+That is the loop after a change: run it, and this machine is running what you just built. It
+leaves the `.nupkg` in `artifacts/` and prints the two commands a recipient runs.
+
+Every run stamps a unique version — a dev timestamp unless you pass `-Version`. Without that,
+NuGet would serve the cached `1.0.0` from `~/.nuget/packages` and install the *previous* build,
+which defeats the purpose of packing at all.
+
+To pack without installing anything:
+
+```bash
+dotnet pack src/Noogen.Backlog.Cli/Noogen.Backlog.Cli.csproj -c Release
+```
+
+Two things are baked in at build time and neither is required: the
+[OAuth client](#the-oauth-client-oauthjson) and the skill. `BacklogSkillDirectory` overrides where the skill is read from, the same way
+`BacklogOAuthClientFile` overrides the client.
 
 ## Authentication
 
@@ -241,7 +369,9 @@ setup guide — wrong client type, malformed JSON, missing `client_secret`, or u
 5. `backlog init --drive <sharedDriveId> [--timezone America/New_York]` — creates the folders,
    the index, the tabs, the formulas, and the Config tab, and stamps the timezone onto the
    spreadsheet. It is idempotent, so re-running repairs a half-finished setup. The timezone
-   defaults to this machine's on first run.
+   defaults to this machine's on first run. The tabs are left in flow order —
+   **Backlog, In Progress, Archive, Config** — and the default tab a new spreadsheet arrives
+   with is renamed into the Backlog tab rather than left behind empty.
 
 Note there is no service-account key to create or distribute, so the
 `constraints/iam.disableServiceAccountKeyCreation` org policy is not in the way. If you *do* want
@@ -266,9 +396,12 @@ backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
             [--bv N --tc N --rroe N --size N] [--description "..."]
-backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
+backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...] [--description "..."]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."
+
+# the score flags are also spelled out, for anyone who prefers them:
+#   --business-value  --time-criticality  --risk-opportunity  --job-size
 
 backlog start <id> [--owner me] [--force]
 backlog block <id> --reason "..." | backlog unblock <id> | backlog review <id>
@@ -276,6 +409,7 @@ backlog archive <id> --as done|cancelled|duplicate [--note "..."]
 backlog restore <id>
 
 backlog init --drive <sharedDriveId> [--timezone America/New_York]
+backlog install-skill [--path DIR] [--force]    # the Claude Code skill, into ~/.claude/skills
 backlog doctor | backlog reindex
 ```
 
@@ -285,9 +419,49 @@ usable by agents: the skill teaches the CLI surface, not the storage layout.
 Verbs *are* the transitions — there is deliberately no `--status` flag to pass an illegal value
 to, and `edit --status` errors with a pointer to the right verb.
 
+Each verb declares the options it reads, and an option it does not read is a **usage error**
+(exit 2) rather than something quietly ignored. A dropped flag is worse than a rejected one: the
+command goes on to succeed at doing nothing, and reports it. Where the flag is one people
+reasonably reach for, the error says what to do instead rather than only listing what is accepted.
+
+`edit --description` replaces the document's `## Description` section and nothing else. That is
+the only prose the tool rewrites — Acceptance Criteria, Notes, the Activity Log, and any section
+someone added come back byte-identical, and a `###` subheading inside the description stays part
+of it. A ticket whose document has no such heading gains one at the top rather than having a
+section guessed at. Blanking it is refused: `--description ""` errors instead of emptying the
+section, because Docs' revision history is the only way back from an overwrite. For the same
+reason the edit writes no Activity Log entry — if the change is worth recording, say so with
+`note`.
+
+### When Google says no
+
+Sheets and Drive have per-minute, per-user quotas, and a `doctor` or `reindex` sweep over a large
+backlog can reach them. A rate-limited request is **rejected, not half-applied**, so the tool
+simply waits and sends it again — up to four times, backing off about 1s, 2s, 4s, 8s, or for
+exactly as long as Google's `Retry-After` asks. While it waits it says so on stderr, so a paused
+command does not look like a hung one, and `--json` output on stdout stays a single clean document:
+
+```
+Google is rate limiting requests; waiting 2.3s before retry 2 of 4.
+```
+
+Only refusals that clear on their own are retried. An exhausted *daily* quota, or a permission
+error, fails immediately — waiting would not have helped. If the retries run out, the command
+exits **4** with kind `rate-limited`; nothing was partly written, so running it again is safe.
+
+Failure kinds, all reported as `{"kind": ..., "error": ...}` under `--json`:
+
+| exit | kind | meaning |
+|---|---|---|
+| 1 | `wip-limit`, `illegal-transition`, `not-found`, `invalid-argument`, `malformed`, `error` | the command was understood and refused, or something went wrong |
+| 2 | `usage` | bad arguments |
+| 3 | `not-signed-in`, `oauth-client-missing`, `oauth-client-invalid` | authentication needs a human |
+| 4 | `rate-limited` | Google throttled us past the retries; try again shortly |
+
 ## WSJF
 
-`WSJF = (bv + tc + rroe) / size`, each on the modified-Fibonacci scale `1, 2, 3, 5, 8, 13, 20`,
+`WSJF = (Business Value + Time Criticality + Risk & Opportunity) / Job Size`, each on the
+modified-Fibonacci scale `1, 2, 3, 5, 8, 13, 20`,
 scored **relatively** — the smallest item in each column should be a 1. Full rubric in
 [.claude/skills/backlog/references/wsjf.md](.claude/skills/backlog/references/wsjf.md).
 
@@ -312,6 +486,7 @@ its own column; if review later needs its own WIP limit, promoting it to a fourt
 | `Noogen.Backlog` | all the logic — store, lifecycle, index, documents, metrics |
 | `Noogen.Backlog.Cli` | thin arg-parsing shell over `IBacklogStore`, packaged as a global tool |
 | `Noogen.Backlog.Tests` | xUnit against in-memory Drive/Sheets fakes |
+| `Noogen.Providers.GoogleWorkspace.Tests` | xUnit over a stub HTTP transport, so gateway requests are asserted on the wire |
 
 The logic deliberately lives in a library rather than the CLI: the Noogen platform agent is a
 future consumer, and adding a `BacklogToolset` there should mean writing `[AgentTool]` wrappers
@@ -322,8 +497,15 @@ the same code path serves a key file today and Workload Identity in GKE later.
 
 ```bash
 dotnet build src/Noogen.Backlog.slnx
-dotnet test  src/Noogen.Backlog.Tests
+dotnet test  src/Noogen.Backlog.slnx
 ```
 
+Once it passes, `./scripts/deploy.ps1` packs it and makes it the tool and skill on this machine.
+See [Distributing](#distributing).
+
+The skill in `.claude/skills/backlog` is both the one agents working *on* this repo load and the
+one the build ships to everyone else — edit it there and deploy; there is no second copy.
+
 Conventions: no tuples, no primary constructors, no `is { }` patterns. Warnings are errors.
+Test methods are named `MethodUnderTest_Scenario_ExpectedBehavior`.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).

@@ -7,4 +7,8 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.10" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noogen.Providers.GoogleWorkspace.Tests" />
+  </ItemGroup>
+
 </Project>

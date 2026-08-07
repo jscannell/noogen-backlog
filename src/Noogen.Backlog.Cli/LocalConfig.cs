@@ -53,6 +53,29 @@ namespace Noogen.Backlog.Cli
         /// <summary>Encrypted refresh tokens, one file per signed-in account.</summary>
         public static string TokenDirectory => System.IO.Path.Combine(Directory, "credentials");
 
+        public const string ClaudeConfigEnvironmentVariable = "CLAUDE_CONFIG_DIR";
+
+        /// <summary>
+        /// Where Claude Code keeps a person's own skills. Not under <see cref="Directory"/>: this
+        /// is Claude's directory, not ours, and we only ever add one folder to it.
+        ///
+        /// CLAUDE_CONFIG_DIR relocates ~/.claude, so honour it — installing beside a moved config
+        /// would write a copy nothing ever loads, which looks like success and is not.
+        /// </summary>
+        public static string SkillsDirectory
+        {
+            get
+            {
+                var configured = Environment.GetEnvironmentVariable(ClaudeConfigEnvironmentVariable);
+
+                var root = string.IsNullOrWhiteSpace(configured)
+                    ? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude")
+                    : configured.Trim();
+
+                return System.IO.Path.Combine(root, "skills");
+            }
+        }
+
         /// <summary>
         /// An explicit service-account key, for CI and automation. Never auto-discovered from
         /// GOOGLE_APPLICATION_CREDENTIALS: that variable usually belongs to something else on a

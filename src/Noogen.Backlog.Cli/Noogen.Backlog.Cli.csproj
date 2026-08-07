@@ -39,6 +39,27 @@
              Text="No OAuth client at $(BacklogOAuthClientFile); the built tool will require oauth.json or NOOGEN_BACKLOG_OAUTH_* at runtime." />
   </Target>
 
+  <!--
+    Bakes the Claude Code skill into the tool, so `backlog install-skill` can write it into
+    ~/.claude/skills and the nupkg is the whole distribution — binary and skill in one artifact
+    that cannot be half-updated.
+
+    The source of truth is the repository's own .claude/skills/backlog, not a copy: this is the
+    same skill the agents working *on* this repo load, so there is nothing to keep in sync.
+
+    LogicalName gives each file a name of `skill/<relative path>`. %(RecursiveDir) uses the build
+    machine's separator, which EmbeddedSkill normalises on the way back out.
+  -->
+  <PropertyGroup>
+    <BacklogSkillDirectory Condition="'$(BacklogSkillDirectory)' == ''">$(MSBuildThisFileDirectory)..\..\.claude\skills\backlog\</BacklogSkillDirectory>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(BacklogSkillDirectory)')">
+    <EmbeddedResource Include="$(BacklogSkillDirectory)**\*"
+                      LogicalName="skill/%(RecursiveDir)%(Filename)%(Extension)"
+                      Visible="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Noogen.Backlog\Noogen.Backlog.csproj" />
   </ItemGroup>
