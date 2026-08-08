@@ -13,6 +13,11 @@ namespace Noogen.Backlog.Cli
     /// the options it asks for, and the bug is an option nobody asks for. Adding a flag to a
     /// command means adding it here too, which is the point — the table is the answer to "what
     /// does this verb accept?", and the help text is written from the same knowledge.
+    ///
+    /// Positional arguments have the same hole and a worse failure. A verb reads
+    /// <c>Positionals[0]</c> and nothing looked at the rest, so a description that the shell had
+    /// torn into fragments arrived as extra positionals, was dropped, and the command exited 0
+    /// with a truncated ticket. <see cref="Validate"/> now rejects the ones no verb reads.
     /// </summary>
     public static class Verbs
     {
@@ -49,8 +54,8 @@ namespace Noogen.Backlog.Cli
             ["wip"] = FilterFlags,
             ["flow"] = ["since"],
             ["show"] = [],
-            ["new"] = ["title", "type", "area", "owner", "description", .. ScoreFlags],
-            ["edit"] = ["title", "area", "owner", "type", "description"],
+            ["new"] = ["title", "type", "area", "owner", "description", "description-file", .. ScoreFlags],
+            ["edit"] = ["title", "area", "owner", "type", "description", "description-file"],
             ["score"] = [.. ScoreFlags],
             ["note"] = ["text"],
             ["start"] = ["owner", "force"],
@@ -61,6 +66,15 @@ namespace Noogen.Backlog.Cli
             ["restore"] = [],
             ["reindex"] = [],
             ["doctor"] = []
+        };
+
+        /// <summary>
+        /// The verbs that take a ticket id. It is the only positional argument in the surface, so
+        /// this is the whole arity table: every other verb takes none.
+        /// </summary>
+        static readonly HashSet<string> TakesTicketId = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "show", "edit", "score", "note", "start", "block", "unblock", "review", "archive", "restore"
         };
 
         const string Lifecycle =
@@ -106,6 +120,35 @@ namespace Noogen.Backlog.Cli
 
                 throw new UsageException($"'{command.Verb}' does not accept --{name}. {detail}");
             }
+
+            var allowed = TakesTicketId.Contains(command.Verb) ? 1 : 0;
+
+            if (command.Positionals.Count > allowed)
+                throw new UsageException(Unexpected(command, accepted, command.Positionals[allowed]));
+        }
+
+        /// <summary>
+        /// Names the argument, then names the reason it is almost always there. A bare "unexpected
+        /// argument" is loud enough to stop the corruption, but the fragment it names looks like
+        /// nonsense until you know a quote in the middle of a value is what produced it — and the
+        /// person reading this has just had a description silently truncated.
+        /// </summary>
+        static string Unexpected(CommandLine command, string[] accepted, string extra)
+        {
+            var shape = TakesTicketId.Contains(command.Verb)
+                ? "takes a ticket id and nothing else positional"
+                : "takes no positional arguments";
+
+            var advice = accepted.Contains("description", StringComparer.OrdinalIgnoreCase)
+                ? " Prose is safest given as --description-file <path>, or --description - to read it from stdin; "
+                    + "neither goes through the command line."
+                : string.Empty;
+
+            return $"'{command.Verb}' {shape}, and got '{extra}'. "
+                + "If that is a fragment of something you passed, the shell split the value: a double quote "
+                + "inside an argument is not escaped by PowerShell, so everything after it arrives as separate "
+                + "arguments."
+                + advice;
         }
     }
 }

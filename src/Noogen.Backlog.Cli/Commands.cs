@@ -465,7 +465,7 @@ namespace Noogen.Backlog.Cli
                 Type = Vocabulary.Parse<TicketType>(command.Option("type") ?? "feature", "type"),
                 Area = command.Option("area") ?? string.Empty,
                 Owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : null,
-                Description = command.Option("description"),
+                Description = TextInput.ReadDescription(command),
                 Score = ReadScore(command)
             };
 
@@ -484,10 +484,7 @@ namespace Noogen.Backlog.Cli
                 Area = command.Option("area"),
                 Owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : null,
                 Type = command.Has("type") ? Vocabulary.Parse<TicketType>(command.RequireOption("type"), "type") : null,
-
-                // RequireOption, not Option: a bare `--description` parses as a valueless flag, and
-                // reading it as "no change" would be the silent no-op this flag exists to end.
-                Description = command.Has("description") ? command.RequireOption("description") : null
+                Description = TextInput.ReadDescription(command)
             };
 
             var ticket = await store.UpdateAsync(id, edit);

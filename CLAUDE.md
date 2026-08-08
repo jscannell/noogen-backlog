@@ -260,6 +260,11 @@ These are the things to be careful about; most of the design follows from them.
 - Every verb declares the options it reads in `Verbs`, and an undeclared option is a usage error.
   The parser collects any `--name`, so a flag nothing reads is invisible: the command runs, does
   nothing, and reports success. Adding a flag to a command means adding it to that table too.
+  The same table caps positionals — a ticket id or nothing — because an argument past that is
+  almost always a value PowerShell split at an unescaped double quote, and dropping it silently
+  truncated the ticket. Prose therefore has two paths that never reach the command line at all
+  (`--description-file`, and `--description -` for stdin); `TextInput` reads both, decoding UTF-8
+  after a BOM and falling back to the console encoding rather than emitting `U+FFFD`.
 - Always write tests, named `MethodUnderTest_Scenario_ExpectedBehavior`. Update READMEs and the
   skill when the command surface changes.
 - [Conventional Commits](https://www.conventionalcommits.org/) (`feat(backlog): ...`).

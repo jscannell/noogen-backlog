@@ -400,6 +400,10 @@ backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...] [--descr
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."
 
+# a description of any length is safer given as a file or a pipe than as an argument:
+#   backlog new --title "..." --description-file body.md
+#   Get-Content body.md -Raw | backlog new --title "..." --description -
+
 # the score flags are also spelled out, for anyone who prefers them:
 #   --business-value  --time-criticality  --risk-opportunity  --job-size
 
@@ -423,6 +427,36 @@ Each verb declares the options it reads, and an option it does not read is a **u
 (exit 2) rather than something quietly ignored. A dropped flag is worse than a rejected one: the
 command goes on to succeed at doing nothing, and reports it. Where the flag is one people
 reasonably reach for, the error says what to do instead rather than only listing what is accepted.
+
+The same goes for positional arguments. A verb takes a ticket id or nothing, and anything past
+that is refused — because the usual way an extra one appears is a value the shell tore in half.
+Windows hands a native process one command-line string; PowerShell quotes an argument containing
+whitespace but does not escape a double quote already inside it, so
+`--description 'he said "no" and left'` ends the quoted run at `"no"` and the rest arrives as
+separate arguments. Those used to be dropped: the ticket was written with everything after the
+first quote missing, and the command exited 0.
+
+### Giving a description that the shell cannot damage
+
+`--description` is fine for a line. For anything longer, or anything containing a quote, use one
+of the two paths that never reach the command line:
+
+```powershell
+backlog new --title "Rework the importer" --description-file body.md
+Get-Content body.md -Raw | backlog new --title "Rework the importer" --description -
+```
+
+A path is a single argument whatever is inside the file it points at, and a pipe is not an
+argument at all. Both accept `-` for standard input, both refuse a file or a pipe that turned out
+to be empty, and passing `--description` and `--description-file` together is a usage error rather
+than one silently winning.
+
+Bytes are read as UTF-8 — after a byte-order mark if there is one, which wins outright. If they
+are not valid UTF-8 they are decoded with the console's own encoding instead, because PowerShell
+5.1 encodes what it pipes to a native process using the OEM code page; reading those bytes as
+UTF-8 would replace every em dash and curly quote with `U+FFFD`, which is the same silent
+corruption in a different place. Well-formed ASCII decodes identically either way, so the fallback
+only runs on input UTF-8 could not have produced.
 
 `edit --description` replaces the document's `## Description` section and nothing else. That is
 the only prose the tool rewrites — Acceptance Criteria, Notes, the Activity Log, and any section

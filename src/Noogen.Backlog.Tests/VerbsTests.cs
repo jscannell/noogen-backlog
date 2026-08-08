@@ -157,5 +157,55 @@ namespace Noogen.Backlog.Tests
 
             Assert.Contains("does not accept --descriptoin", exception.Message, StringComparison.Ordinal);
         }
+
+        // --- positionals ---
+        //
+        // The shape NG-0045 was filed for. PowerShell does not escape a double quote inside an
+        // argument it quotes, so a description containing one is torn apart and its tail arrives
+        // as extra positional arguments. They used to be dropped: the ticket was created with a
+        // truncated description, and the command exited 0.
+
+        [Fact]
+        public void Validate_ArgumentsLeftOverFromASplitDescription_Refuses()
+        {
+            var exception = Reject("new", "--title", "probe", "--description", "L1 has ", "quoted", " words END");
+
+            Assert.Contains("'new' takes no positional arguments", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("'quoted'", exception.Message, StringComparison.Ordinal);
+        }
+
+        /// <summary>Naming the split is the whole value: the fragment alone reads as nonsense.</summary>
+        [Fact]
+        public void Validate_UnexpectedArgument_ExplainsTheQuotingAndTheSafeInputPaths()
+        {
+            var exception = Reject("new", "--title", "probe", "stray");
+
+            Assert.Contains("double quote", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("--description-file", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("--description -", exception.Message, StringComparison.Ordinal);
+        }
+
+        /// <summary>A verb with no prose to give has no reason to be told where to put prose.</summary>
+        [Fact]
+        public void Validate_UnexpectedArgumentOnAVerbWithoutDescription_OmitsTheProseAdvice()
+        {
+            var exception = Reject("start", "NG-12", "stray");
+
+            Assert.Contains("takes a ticket id and nothing else positional", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("--description", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Theory]
+        [InlineData("show", "NG-12")]
+        [InlineData("edit", "NG-12")]
+        [InlineData("archive", "NG-12")]
+        public void Validate_TheOneTicketIdAVerbReads_IsAccepted(params string[] args) => Accept(args);
+
+        [Theory]
+        [InlineData("show", "NG-12", "NG-13")]
+        [InlineData("score", "NG-12", "5")]
+        [InlineData("list", "backlog")]
+        [InlineData("doctor", "extra", "--json")]
+        public void Validate_PositionalNoVerbReads_Refuses(params string[] args) => Reject(args);
     }
 }

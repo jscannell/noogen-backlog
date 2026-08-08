@@ -216,6 +216,12 @@ namespace Noogen.Backlog.Cli
                       [--bv N --tc N --rroe N --size N] [--description "..."]
                   edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
                        [--description "..."]             Replaces the Description section
+
+                  Prose given as --description goes through the shell, which on Windows will
+                  split the value at an embedded double quote. For anything longer than a line:
+                    --description-file body.md           Read the description from a file
+                    --description -                      Read it from standard input
+                  e.g.  Get-Content body.md -Raw | backlog new --title "..." --description -
                   score <id> [--bv N] [--tc N] [--rroe N] [--size N]
                   note <id> --text "..."                  Append to the Activity Log
 

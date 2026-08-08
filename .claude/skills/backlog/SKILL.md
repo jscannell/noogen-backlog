@@ -36,6 +36,10 @@ backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...] [--descr
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."                  # appends to the Activity Log
 
+# new and edit also take the description off the command line entirely — see below
+backlog new --title "..." --description-file body.md
+Get-Content body.md -Raw | backlog new --title "..." --description -
+
 # score flags also accept their spelled-out forms, which is what the Sheet's
 # columns are called: --business-value --time-criticality --risk-opportunity --job-size
 
@@ -74,8 +78,23 @@ whole new section, not just the part that changed. `--description ""` is refused
 treated as "empty it". The edit writes no Activity Log entry; if the change is worth recording,
 follow it with `note`.
 
-Every verb rejects an option it does not read (exit 2, kind `usage`), so a flag borrowed from
-another verb fails loudly rather than being ignored.
+### Writing a description
+
+**Pass anything longer than a line as `--description-file <path>`, not as `--description "..."`.**
+Write the prose to a temporary file and point at it.
+
+The reason is the shell, not the tool. Windows hands a native process one command-line string, and
+PowerShell does not escape a double quote inside an argument it quotes — so a description
+containing one is split, and everything after the first quote arrives as separate arguments. That
+is refused now (exit 2), but the ticket still does not get filed. A file path is one argument
+whatever the file contains, so it cannot be split. `--description -` reads standard input for the
+same reason; use it when the text is already in a pipe.
+
+Both refuse an empty file or pipe, and passing both flags at once is an error.
+
+Every verb rejects an option it does not read and any positional argument beyond a ticket id
+(exit 2, kind `usage`), so a flag borrowed from another verb — or a fragment of a value the shell
+split — fails loudly rather than being ignored.
 
 ## Rules
 
