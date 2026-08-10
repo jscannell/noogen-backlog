@@ -457,6 +457,8 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> NewAsync(CommandLine command)
         {
+            TextInput.RejectSharedStandardInput(command);
+
             var store = await StoreAsync();
 
             var request = new NewTicket
@@ -466,15 +468,50 @@ namespace Noogen.Backlog.Cli
                 Area = command.Option("area") ?? string.Empty,
                 Owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : null,
                 Description = TextInput.ReadDescription(command),
+                AcceptanceCriteria = TextInput.ReadAcceptanceCriteria(command),
                 Score = ReadScore(command)
             };
 
             var ticket = await store.CreateAsync(request);
+
+            Remind(command, ticket, request.Description is null, request.AcceptanceCriteria is null);
+
             return Report(command, ticket, $"Created {ticket.Id}.");
+        }
+
+        /// <summary>
+        /// Names the sections that went in as `*TODO*`.
+        ///
+        /// A placeholder is the honest thing to write when nobody said what "done" means, and
+        /// filing fast is worth keeping — but nothing used to say the placeholder was there, so an
+        /// unwritten acceptance criterion looked exactly like a finished ticket. Stderr, and
+        /// before the report: stdout under `--json` is one document, and this is a reminder rather
+        /// than part of the result.
+        /// </summary>
+        static void Remind(CommandLine command, Ticket ticket, bool noDescription, bool noCriteria)
+        {
+            if (!noDescription && !noCriteria)
+                return;
+
+            var missing = new List<string>();
+
+            if (noDescription)
+                missing.Add("description");
+
+            if (noCriteria)
+                missing.Add("acceptance criteria");
+
+            Output.WriteError(
+                $"{ticket.Id} has no {string.Join(" and no ", missing)} — the section(s) say *TODO*. Fill in with:\n"
+                + $"  backlog edit {ticket.Id}"
+                + (noDescription ? " --description-file <path>" : string.Empty)
+                + (noCriteria ? " --acceptance-criteria-file <path>" : string.Empty));
         }
 
         public async Task<int> EditAsync(CommandLine command)
         {
+            TextInput.RejectSharedStandardInput(command);
+
             var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
@@ -484,7 +521,8 @@ namespace Noogen.Backlog.Cli
                 Area = command.Option("area"),
                 Owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : null,
                 Type = command.Has("type") ? Vocabulary.Parse<TicketType>(command.RequireOption("type"), "type") : null,
-                Description = TextInput.ReadDescription(command)
+                Description = TextInput.ReadDescription(command),
+                AcceptanceCriteria = TextInput.ReadAcceptanceCriteria(command)
             };
 
             var ticket = await store.UpdateAsync(id, edit);

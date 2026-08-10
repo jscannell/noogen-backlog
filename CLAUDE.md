@@ -124,18 +124,29 @@ These are the things to be careful about; most of the design follows from them.
    see, and there must never be a third that is not:
 
    - `AppendActivity` adds one line under `## Activity Log`.
-   - `ReplaceSection` replaces the text under one heading, used only for `## Description` and only
-     from `edit --description`. The section ends at the next heading of the same level or higher,
-     so every other section — including one a human added — comes through byte-identical, and a
-     `###` subheading inside it is part of it rather than the end of it. A missing heading
-     *inserts* one at the top instead of failing or guessing which section was meant: insertion
-     cannot destroy anything, which is the property that earns this its exception.
+   - `ReplaceSection` replaces the text under one heading, used for exactly two of them:
+     `## Description` and `## Acceptance Criteria`, the sections the CLI is expected to author.
+     The section ends at the next heading of the same level or higher, so every other section —
+     `## Notes`, and any a human added — comes through byte-identical, and a `###` subheading
+     inside it is part of it rather than the end of it. A missing heading *inserts* one at the top
+     instead of failing or guessing which section was meant: insertion cannot destroy anything,
+     which is the property that earns this its exception.
+
+     Acceptance criteria are on that list because leaving them off did not make them a human's:
+     it made them nobody's. With no CLI path, every ticket an agent filed kept `- [ ] *TODO*` and
+     read downstream as ready when nothing had said what "done" meant. A section a machine is
+     expected to write needs a way to write it — but the list is meant to stay at two, and a third
+     means deciding again that a machine should be allowed to overwrite that heading.
+
+     Both still seed `*TODO*` when nothing is given, because filing fast is worth keeping. What
+     must not come back is a *silent* placeholder: `new` names the sections it left unwritten, on
+     stderr, because stdout under `--json` is one document.
 
    Everything else about the body stays hands-off. In particular this is not licence to
-   "normalise" prose — see invariant 18. Blanking a description is refused rather than treated as
-   a clear: every other editable field is a scalar the Sheet also holds, so emptying one loses
-   nothing, while emptying this one throws away writing. Docs' own revision history is what
-   recovers an overwrite, which is also why a description edit writes no Activity Log entry.
+   "normalise" prose — see invariant 18. Blanking either section is refused rather than treated as
+   a clear: every editable *field* is a scalar the Sheet also holds, so emptying one loses
+   nothing, while emptying a section throws away writing. Docs' own revision history is what
+   recovers an overwrite, which is also why neither edit writes an Activity Log entry.
 
 10. **User text is escaped before it reaches a cell.** `SheetIndex.EscapeUserText` prefixes a
     leading `=`, `+`, `-`, or `@` with an apostrophe. A ticket title is untrusted input.
@@ -262,9 +273,11 @@ These are the things to be careful about; most of the design follows from them.
   nothing, and reports success. Adding a flag to a command means adding it to that table too.
   The same table caps positionals — a ticket id or nothing — because an argument past that is
   almost always a value PowerShell split at an unescaped double quote, and dropping it silently
-  truncated the ticket. Prose therefore has two paths that never reach the command line at all
-  (`--description-file`, and `--description -` for stdin); `TextInput` reads both, decoding UTF-8
-  after a BOM and falling back to the console encoding rather than emitting `U+FFFD`.
+  truncated the ticket. Every prose option therefore has two paths that never reach the command
+  line at all (`--<name>-file`, and `--<name> -` for stdin); `TextInput.ReadProse` reads all three
+  spellings for any option name, decoding UTF-8 after a BOM and falling back to the console
+  encoding rather than emitting `U+FFFD`. Only one option per command may read stdin — there is
+  one pipe, and the second reader would report the text as empty, naming the wrong problem.
 - Always write tests, named `MethodUnderTest_Scenario_ExpectedBehavior`. Update READMEs and the
   skill when the command surface changes.
 - [Conventional Commits](https://www.conventionalcommits.org/) (`feat(backlog): ...`).

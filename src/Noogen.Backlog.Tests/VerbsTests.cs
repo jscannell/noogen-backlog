@@ -26,6 +26,26 @@ namespace Noogen.Backlog.Tests
             Assert.Contains("'score' does not accept --description", exception.Message, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// The gap this closed: with no flag for it, acceptance criteria could only be written by
+        /// opening the document, so an agent filing a ticket left `- [ ] *TODO*` behind every time.
+        /// </summary>
+        [Theory]
+        [InlineData("new", "--title", "x", "--acceptance-criteria", "- [ ] it works")]
+        [InlineData("new", "--title", "x", "--acceptance-criteria-file", "ac.md")]
+        [InlineData("edit", "NG-12", "--acceptance-criteria", "- [ ] it works")]
+        [InlineData("edit", "NG-12", "--acceptance-criteria-file", "ac.md")]
+        [InlineData("edit", "NG-12", "--acceptance-criteria", "-")]
+        public void Validate_AcceptanceCriteria_IsAccepted(params string[] args) => Accept(args);
+
+        [Fact]
+        public void Validate_AcceptanceCriteriaOnAVerbThatDoesNotWriteDocuments_Refuses()
+        {
+            var exception = Reject("note", "NG-12", "--text", "x", "--acceptance-criteria", "- [ ] it works");
+
+            Assert.Contains("'note' does not accept --acceptance-criteria", exception.Message, StringComparison.Ordinal);
+        }
+
         [Fact]
         public void Validate_MistypedOption_RefusesAndListsWhatTheVerbAccepts()
         {
@@ -96,7 +116,9 @@ namespace Noogen.Backlog.Tests
         [InlineData("flow", "--since", "90d")]
         [InlineData("new", "--title", "x", "--type", "bug", "--area", "cli", "--owner", "me", "--description", "why")]
         [InlineData("new", "--title", "x", "--bv", "5", "--tc", "3", "--rroe", "2", "--size", "1")]
+        [InlineData("new", "--title", "x", "--description-file", "body.md", "--acceptance-criteria-file", "ac.md")]
         [InlineData("edit", "NG-12", "--title", "x", "--area", "cli", "--owner", "me", "--type", "chore", "--description", "why")]
+        [InlineData("edit", "NG-12", "--acceptance-criteria", "- [ ] it works")]
         [InlineData("score", "NG-12", "--bv", "5", "--tc", "3", "--rroe", "2", "--size", "1")]
         [InlineData("score", "NG-12", "--business-value", "5", "--time-criticality", "3", "--risk-opportunity", "2", "--job-size", "1")]
         [InlineData("note", "NG-12", "--text", "a note")]

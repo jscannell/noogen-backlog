@@ -45,6 +45,18 @@ namespace Noogen.Backlog.Cli
         /// <summary>What <c>Commands.BuildFilter</c> reads, for the three verbs that call it.</summary>
         static readonly string[] FilterFlags = ["area", "owner", "top"];
 
+        /// <summary>
+        /// The prose sections the CLI authors, each with the two spellings that never reach the
+        /// command line. Both verbs that write a document take all four — a ticket is filed and
+        /// corrected through the same surface, and acceptance criteria left to Docs alone were the
+        /// ones that never got written.
+        /// </summary>
+        static readonly string[] ProseFlags =
+        [
+            "description", "description-file",
+            "acceptance-criteria", "acceptance-criteria-file"
+        ];
+
         static readonly Dictionary<string, string[]> Accepted = new(StringComparer.OrdinalIgnoreCase)
         {
             ["login"] = ["account"],
@@ -57,8 +69,8 @@ namespace Noogen.Backlog.Cli
             ["wip"] = FilterFlags,
             ["flow"] = ["since"],
             ["show"] = [],
-            ["new"] = ["title", "type", "area", "owner", "description", "description-file", .. ScoreFlags],
-            ["edit"] = ["title", "area", "owner", "type", "description", "description-file"],
+            ["new"] = ["title", "type", "area", "owner", .. ProseFlags, .. ScoreFlags],
+            ["edit"] = ["title", "area", "owner", "type", .. ProseFlags],
             ["score"] = [.. ScoreFlags],
             ["note"] = ["text"],
             ["start"] = ["owner", "force"],

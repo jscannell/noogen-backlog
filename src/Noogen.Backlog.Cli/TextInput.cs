@@ -18,24 +18,58 @@ namespace Noogen.Backlog.Cli
         /// <summary>The conventional "read it from stdin" spelling, accepted by both flags.</summary>
         public const string StandardInput = "-";
 
+        /// <summary>The Description section, from whichever of the three ways it was given.</summary>
+        public static string? ReadDescription(CommandLine command) => ReadProse(command, "description");
+
         /// <summary>
-        /// The description, from whichever of the three ways it was given, or null for "not given"
-        /// — which on <c>edit</c> means "leave the body alone".
-        ///
-        /// <c>--description</c> is the convenient one and the one the shell can damage. The other
-        /// two name a file or a pipe, and neither can be split by quoting: a path is one argument
-        /// whatever is inside the file it points at.
+        /// The Acceptance Criteria section, given the same three ways for the same reasons. It is
+        /// the prose most likely to be a multi-line checklist, so the file and stdin paths matter
+        /// here more than anywhere.
         /// </summary>
-        public static string? ReadDescription(CommandLine command)
+        public static string? ReadAcceptanceCriteria(CommandLine command) => ReadProse(command, "acceptance-criteria");
+
+        /// <summary>Every prose option a verb can carry, in the order a command line lists them.</summary>
+        static readonly string[] ProseOptions = ["description", "acceptance-criteria"];
+
+        /// <summary>
+        /// Refuses the one combination a shell cannot deliver. Standard input is a single stream,
+        /// so the first reader drains it and the second finds nothing — which would be reported as
+        /// "came back empty", naming the wrong problem entirely. Callers that read more than one
+        /// prose option run this first.
+        /// </summary>
+        public static void RejectSharedStandardInput(CommandLine command)
         {
-            var inline = command.Has("description");
-            var file = command.Has("description-file");
+            var piped = ProseOptions.Where(name => command.Option(name) == StandardInput).ToList();
+
+            if (piped.Count > 1)
+            {
+                throw new UsageException(
+                    $"Only one option can read standard input, and {string.Join(" and ", piped.Select(name => "--" + name))} "
+                    + "both asked for it — there is one pipe, so the second would find it already read. "
+                    + "Write one of them to a file and pass it as --<option>-file <path>.");
+            }
+        }
+
+        /// <summary>
+        /// A prose option's text, from whichever of the three ways it was given, or null for "not
+        /// given" — which on <c>edit</c> means "leave that section alone".
+        ///
+        /// <c>--name</c> is the convenient one and the one the shell can damage.
+        /// <c>--name-file</c> and <c>--name -</c> name a file or a pipe, and neither can be split
+        /// by quoting: a path is one argument whatever is inside the file it points at.
+        /// </summary>
+        public static string? ReadProse(CommandLine command, string name)
+        {
+            var fileName = name + "-file";
+
+            var inline = command.Has(name);
+            var file = command.Has(fileName);
 
             if (inline && file)
-                throw new UsageException("Pass either --description or --description-file, not both.");
+                throw new UsageException($"Pass either --{name} or --{fileName}, not both.");
 
             if (file)
-                return Read(command.RequireOption("description-file"), "--description-file");
+                return Read(command.RequireOption(fileName), "--" + fileName);
 
             if (!inline)
                 return null;
@@ -43,9 +77,9 @@ namespace Noogen.Backlog.Cli
             // No guard against a bare `--description` here any more: Verbs declares it as an
             // option that takes a value, so the parser refuses one without and this is only ever
             // reached with the value in hand.
-            var value = command.RequireOption("description");
+            var value = command.RequireOption(name);
 
-            return value == StandardInput ? Read(value, "--description") : value;
+            return value == StandardInput ? Read(value, "--" + name) : value;
         }
 
         /// <summary>

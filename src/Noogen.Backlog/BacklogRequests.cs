@@ -13,6 +13,13 @@ namespace Noogen.Backlog
         public WsjfScore Score { get; set; } = new();
 
         public string? Description { get; set; }
+
+        /// <summary>
+        /// The document's Acceptance Criteria section, or null to leave the placeholder in. It is
+        /// a request field rather than something only Docs can supply because a ticket nobody has
+        /// said "done" for is not a ticket anyone can pick up.
+        /// </summary>
+        public string? AcceptanceCriteria { get; set; }
     }
 
     /// <summary>
@@ -30,15 +37,21 @@ namespace Noogen.Backlog
         public TicketType? Type { get; set; }
 
         /// <summary>
-        /// New text for the document's Description section, or null to leave the body alone.
+        /// New text for the document's Description section, or null to leave it alone.
         ///
-        /// The only prose the store will rewrite, and only that one section — see
+        /// One of the two sections the store will rewrite, and only those two — see
         /// <see cref="TicketDocument.ReplaceSection"/>. Blank is refused rather than treated as
-        /// "clear it": every other field here is a scalar the Sheet also holds, so blanking one
-        /// loses nothing, while blanking this one throws away writing with no CLI way back.
-        /// Google Docs' own revision history is what recovers an overwrite.
+        /// "clear it": every scalar field here is one the Sheet also holds, so blanking one loses
+        /// nothing, while blanking this one throws away writing with no CLI way back. Google Docs'
+        /// own revision history is what recovers an overwrite.
         /// </summary>
         public string? Description { get; set; }
+
+        /// <summary>
+        /// New text for the document's Acceptance Criteria section, or null to leave it alone.
+        /// Blank is refused for the same reason a blank description is.
+        /// </summary>
+        public string? AcceptanceCriteria { get; set; }
     }
 
     public class TicketFilter

@@ -395,13 +395,15 @@ backlog show <id>
 backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
-            [--bv N --tc N --rroe N --size N] [--description "..."]
-backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...] [--description "..."]
+            [--bv N --tc N --rroe N --size N]
+            [--description "..."] [--acceptance-criteria "..."]
+backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
+                  [--description "..."] [--acceptance-criteria "..."]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."
 
-# a description of any length is safer given as a file or a pipe than as an argument:
-#   backlog new --title "..." --description-file body.md
+# either section is safer given as a file or a pipe than as an argument, at any length:
+#   backlog new --title "..." --description-file body.md --acceptance-criteria-file ac.md
 #   Get-Content body.md -Raw | backlog new --title "..." --description -
 
 # the score flags are also spelled out, for anyone who prefers them:
@@ -444,20 +446,22 @@ whitespace but does not escape a double quote already inside it, so
 separate arguments. Those used to be dropped: the ticket was written with everything after the
 first quote missing, and the command exited 0.
 
-### Giving a description that the shell cannot damage
+### Giving prose that the shell cannot damage
 
-`--description` is fine for a line. For anything longer, or anything containing a quote, use one
-of the two paths that never reach the command line:
+`--description` and `--acceptance-criteria` are fine for a line. For anything longer, or anything
+containing a quote, use one of the two paths that never reach the command line:
 
 ```powershell
-backlog new --title "Rework the importer" --description-file body.md
+backlog new --title "Rework the importer" --description-file body.md --acceptance-criteria-file ac.md
 Get-Content body.md -Raw | backlog new --title "Rework the importer" --description -
 ```
 
 A path is a single argument whatever is inside the file it points at, and a pipe is not an
 argument at all. Both accept `-` for standard input, both refuse a file or a pipe that turned out
 to be empty, and passing `--description` and `--description-file` together is a usage error rather
-than one silently winning.
+than one silently winning. Only one option per command may read standard input: there is one pipe,
+so the second reader would find it drained and report the text as empty, naming the wrong problem.
+That combination is refused up front instead.
 
 Bytes are read as UTF-8 — after a byte-order mark if there is one, which wins outright. If they
 are not valid UTF-8 they are decoded with the console's own encoding instead, because PowerShell
@@ -466,14 +470,19 @@ UTF-8 would replace every em dash and curly quote with `U+FFFD`, which is the sa
 corruption in a different place. Well-formed ASCII decodes identically either way, so the fallback
 only runs on input UTF-8 could not have produced.
 
-`edit --description` replaces the document's `## Description` section and nothing else. That is
-the only prose the tool rewrites — Acceptance Criteria, Notes, the Activity Log, and any section
-someone added come back byte-identical, and a `###` subheading inside the description stays part
-of it. A ticket whose document has no such heading gains one at the top rather than having a
-section guessed at. Blanking it is refused: `--description ""` errors instead of emptying the
-section, because Docs' revision history is the only way back from an overwrite. For the same
-reason the edit writes no Activity Log entry — if the change is worth recording, say so with
-`note`.
+`--description` and `--acceptance-criteria` replace the document's `## Description` and
+`## Acceptance Criteria` sections and nothing else. Those two are the only prose the tool
+rewrites — Notes, the Activity Log, and any section someone added come back byte-identical, and a
+`###` subheading inside one stays part of it. A document with no such heading gains one rather
+than having a section guessed at. Blanking is refused: `--description ""` errors instead of
+emptying the section, because Docs' revision history is the only way back from an overwrite. For
+the same reason neither writes an Activity Log entry — if the change is worth recording, say so
+with `note`.
+
+Acceptance criteria are a flag rather than something only Docs can supply because leaving them to
+Docs meant they never got written. A ticket filed without them carries `- [ ] *TODO*`, and
+`backlog new` says so on stderr, naming the command that fills it in — a placeholder nothing
+mentions is indistinguishable from a finished ticket.
 
 ### When Google says no
 

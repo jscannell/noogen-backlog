@@ -417,10 +417,10 @@ namespace Noogen.Backlog.Tests
         public void Serialize_BodyHasHandWrittenProseInEverySection_CopiesItThroughVerbatim()
         {
             var body = TicketDocument.AppendActivity(
-                TicketDocument.BuildInitialBody(Sample(), "A described thing."),
+                TicketDocument.BuildInitialBody(Sample(), "A described thing.", null),
                 new DateTimeOffset(2026, 8, 7, 10, 0, 0, TimeSpan.Zero),
                 "started")
-                .Replace("- [ ] *TODO*", "- [x] The gateway round-trips\n- [ ] doctor reports it")
+                .Replace(TicketDocument.UnwrittenCriteria, "- [x] The gateway round-trips\n- [ ] doctor reports it")
                 .Replace("## Notes\n", "## Notes\n\nSpoke to the platform team; they want the batch API.\n");
 
             var round = TicketDocument.Parse(TicketDocument.Serialize(Sample(), body));
@@ -481,7 +481,7 @@ namespace Noogen.Backlog.Tests
         [Fact]
         public void BuildInitialBody_Always_OmitsTheHeadingSerializeWrites()
         {
-            var body = TicketDocument.BuildInitialBody(Sample(), "Something.");
+            var body = TicketDocument.BuildInitialBody(Sample(), "Something.", null);
 
             Assert.StartsWith("## Description", body, StringComparison.Ordinal);
             Assert.Equal(1, CountOccurrences(TicketDocument.Serialize(Sample(), body), "# NG-0007"));
@@ -506,7 +506,7 @@ namespace Noogen.Backlog.Tests
         [Fact]
         public void AppendActivity_BodyAlreadyHasAnActivityLog_AppendsUnderTheExistingHeading()
         {
-            var body = TicketDocument.BuildInitialBody(Sample(), "Something.");
+            var body = TicketDocument.BuildInitialBody(Sample(), "Something.", null);
             var when = new DateTimeOffset(2026, 8, 7, 10, 0, 0, TimeSpan.Zero);
 
             var updated = TicketDocument.AppendActivity(body, when, "started");

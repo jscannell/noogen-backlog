@@ -1,9 +1,9 @@
 namespace Noogen.Backlog.Tests
 {
     /// <summary>
-    /// Replacing the Description is the only prose the store rewrites, so what these pin is mostly
-    /// what it must *not* touch. Eating a human's edit is the one unrecoverable failure here
-    /// (invariant 9), and a section rewrite is the operation with the appetite for it.
+    /// Description and Acceptance Criteria are the only prose the store rewrites, so what these
+    /// pin is mostly what it must *not* touch. Eating a human's edit is the one unrecoverable
+    /// failure here (invariant 9), and a section rewrite is the operation with the appetite for it.
     /// </summary>
     public class TicketSectionTests
     {
@@ -15,6 +15,9 @@ namespace Noogen.Backlog.Tests
 
         static string Replace(string body, string text) =>
             TicketDocument.ReplaceSection(body, TicketDocument.DescriptionHeading, text);
+
+        static string ReplaceCriteria(string body, string text) =>
+            TicketDocument.ReplaceSection(body, TicketDocument.AcceptanceCriteriaHeading, text);
 
         [Fact]
         public void ReplaceSection_SectionExists_ReplacesOnlyItsText()
@@ -144,6 +147,69 @@ namespace Noogen.Backlog.Tests
             var once = Replace(Body, "New.");
 
             Assert.Equal(once, Replace(once, "New."));
+        }
+
+        // --- the second heading it is used for ---
+        //
+        // A section in the middle of the body, unlike the description: it has a neighbour on both
+        // sides, so a rewrite that ran to the wrong boundary would eat one of them.
+
+        [Fact]
+        public void ReplaceSection_AcceptanceCriteria_ReplacesOnlyThatSection()
+        {
+            var rewritten = ReplaceCriteria(Body, "- [x] the gateway round-trips\n- [ ] doctor reports it");
+
+            Assert.Contains("## Acceptance Criteria\n\n- [x] the gateway round-trips\n- [ ] doctor reports it\n",
+                rewritten, StringComparison.Ordinal);
+            Assert.DoesNotContain("*TODO*", rewritten, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void ReplaceSection_AcceptanceCriteria_LeavesTheSectionsOnBothSidesByteIdentical()
+        {
+            var rewritten = ReplaceCriteria(Body, "- [ ] something measurable");
+
+            Assert.Equal(
+                Body[..Body.IndexOf("## Acceptance Criteria", StringComparison.Ordinal)],
+                rewritten[..rewritten.IndexOf("## Acceptance Criteria", StringComparison.Ordinal)]);
+
+            Assert.Equal(
+                Body[Body.IndexOf("## Notes", StringComparison.Ordinal)..],
+                rewritten[rewritten.IndexOf("## Notes", StringComparison.Ordinal)..]);
+        }
+
+        /// <summary>
+        /// Both sections rewritten in one pass, which is what `new`-then-fill-in and a two-flag
+        /// `edit` both come down to. Replacing one must leave the other's heading findable.
+        /// </summary>
+        [Fact]
+        public void ReplaceSection_BothEditableSections_KeepsTheDocumentsShape()
+        {
+            var rewritten = ReplaceCriteria(Replace(Body, "A better description."), "- [ ] something measurable");
+
+            Assert.Equal(
+                "## Description\n\nA better description.\n\n" +
+                "## Acceptance Criteria\n\n- [ ] something measurable\n\n" +
+                "## Notes\n\nSomething a person wrote.\n\n" +
+                "## Activity Log\n\n- 2026-08-07 09:00 — created\n",
+                rewritten);
+        }
+
+        /// <summary>
+        /// A document written before the section existed — or one whose heading a person renamed —
+        /// gains one rather than having a section guessed at. Insertion cannot destroy anything,
+        /// which is the property that earns the rewrite its exception in the first place.
+        /// </summary>
+        [Fact]
+        public void ReplaceSection_AcceptanceCriteriaHeadingIsMissing_InsertsOneAndKeepsTheWholeBody()
+        {
+            var body = "## Description\n\nWhy this matters.\n\n## Notes\n\nSomething a person wrote.\n";
+
+            var rewritten = ReplaceCriteria(body, "- [ ] something measurable");
+
+            Assert.Contains("Why this matters.", rewritten, StringComparison.Ordinal);
+            Assert.Contains("Something a person wrote.", rewritten, StringComparison.Ordinal);
+            Assert.StartsWith("## Acceptance Criteria\n\n- [ ] something measurable", rewritten, StringComparison.Ordinal);
         }
     }
 }

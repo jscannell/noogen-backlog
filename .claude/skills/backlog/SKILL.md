@@ -31,13 +31,15 @@ backlog show <id>                               # one ticket including its body
 backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
-            [--bv N --tc N --rroe N --size N] [--description "..."]
-backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...] [--description "..."]
+            [--bv N --tc N --rroe N --size N]
+            [--description "..."] [--acceptance-criteria "..."]
+backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
+                  [--description "..."] [--acceptance-criteria "..."]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."                  # appends to the Activity Log
 
-# new and edit also take the description off the command line entirely — see below
-backlog new --title "..." --description-file body.md
+# both prose options also come off the command line entirely — see below
+backlog new --title "..." --description-file body.md --acceptance-criteria-file ac.md
 Get-Content body.md -Raw | backlog new --title "..." --description -
 
 # score flags also accept their spelled-out forms, which is what the Sheet's
@@ -68,20 +70,45 @@ scores, then the prose sections. The heading is the only place the id and title 
 `backlog show <id>` prints the prose from the first section onwards — the heading and the bullets
 would only repeat the summary line it already prints above them.
 
-**The CLI writes the heading and the bullets; below them it only ever touches two sections.**
-`edit --description "..."` replaces the `## Description` section, and `note` appends to the
-Activity Log. Everything else — Acceptance Criteria, Notes, anything a person added — is theirs,
-so to change one of those, give them the document URL from `backlog show <id>` to edit in Docs.
+**The CLI writes the heading and the bullets; below them it touches three things.**
+`--description` replaces the `## Description` section, `--acceptance-criteria` replaces the
+`## Acceptance Criteria` section, and `note` appends to the Activity Log. Everything else —
+`## Notes`, anything a person added — is theirs, so to change one of those, give them the document
+URL from `backlog show <id>` to edit in Docs.
 
-`--description` **replaces**, so read the current text with `backlog show <id>` first and pass the
-whole new section, not just the part that changed. `--description ""` is refused rather than
-treated as "empty it". The edit writes no Activity Log entry; if the change is worth recording,
-follow it with `note`.
+Both prose options **replace** the whole section, so read the current text with
+`backlog show <id>` first and pass the whole new version, not just the part that changed. Passing
+`""` is refused rather than treated as "empty it". Neither writes an Activity Log entry; if the
+change is worth recording, follow it with `note`.
 
-### Writing a description
+### Acceptance criteria are yours to write, not to leave as *TODO*
 
-**Pass anything longer than a line as `--description-file <path>`, not as `--description "..."`.**
-Write the prose to a temporary file and point at it.
+A ticket filed with no acceptance criteria says `- [ ] *TODO*`, which reads to everyone downstream
+as a ticket that is ready when nobody has said what "done" means. **Write them.** You do not need
+permission, and you do not need to hand anyone a Docs link — `--acceptance-criteria` is a
+first-class flag on both `new` and `edit`.
+
+Write them as a markdown checklist, one line per condition, each one something a person could
+check without asking you what you meant:
+
+```
+- [ ] `backlog doctor` reports the duplicate row and exits 1
+- [ ] the row survives a restart
+- [ ] README documents the new flag
+```
+
+If you genuinely cannot tell what "done" means — the request was one line and you have no other
+context — file the ticket anyway rather than blocking, then **say in your reply that the criteria
+are still `*TODO*` and what you would need to write them.** `backlog new` prints that reminder on
+stderr for the same reason. Do not silently leave the placeholder and report the ticket as filed.
+
+The same goes for the description: file with one, or say that you did not.
+
+### Writing a description or a set of criteria
+
+**Pass anything longer than a line as `--description-file <path>` or
+`--acceptance-criteria-file <path>`, not inline.** Write the prose to a temporary file and point at
+it. A checklist is almost always longer than a line, so this is the normal path for criteria.
 
 The reason is the shell, not the tool. Windows hands a native process one command-line string, and
 PowerShell does not escape a double quote inside an argument it quotes — so a description
@@ -90,7 +117,9 @@ is refused now (exit 2), but the ticket still does not get filed. A file path is
 whatever the file contains, so it cannot be split. `--description -` reads standard input for the
 same reason; use it when the text is already in a pipe.
 
-Both refuse an empty file or pipe, and passing both flags at once is an error.
+Every path refuses an empty file or pipe, and giving one section both its flags at once is an
+error. Only one option per command may read standard input — there is one pipe — so when both
+sections are long, give at least one of them as a file.
 
 Every verb rejects an option it does not read and any positional argument beyond a ticket id
 (exit 2, kind `usage`), so a flag borrowed from another verb — or a fragment of a value the shell

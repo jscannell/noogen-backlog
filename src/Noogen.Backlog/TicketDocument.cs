@@ -374,14 +374,19 @@ namespace Noogen.Backlog
         /// Emphasis is `*asterisks*`, not `_underscores_`, because Docs renormalises the second to
         /// the first on import. Writing what the export already produces means a new ticket's body
         /// survives its first save unchanged rather than coming back subtly rewritten.
+        ///
+        /// Both editable sections fall back to `*TODO*` when nothing was given, because filing
+        /// fast is worth keeping — but a placeholder is a promise to come back, so the CLI says
+        /// which ones are still outstanding and both can be filled in later without opening Docs.
         /// </summary>
-        public static string BuildInitialBody(Ticket ticket, string? description, TimeZoneInfo? zone = null)
+        public static string BuildInitialBody(Ticket ticket, string? description, string? acceptanceCriteria, TimeZoneInfo? zone = null)
         {
             var builder = new StringBuilder();
 
             builder.Append("## Description\n\n");
             builder.Append(string.IsNullOrWhiteSpace(description) ? "*TODO*" : description.Trim()).Append("\n\n");
-            builder.Append("## Acceptance Criteria\n\n- [ ] *TODO*\n\n");
+            builder.Append("## Acceptance Criteria\n\n");
+            builder.Append(string.IsNullOrWhiteSpace(acceptanceCriteria) ? UnwrittenCriteria : acceptanceCriteria.Trim()).Append("\n\n");
             builder.Append("## Notes\n\n");
             builder.Append("## Activity Log\n\n");
             builder.Append("- ").Append(SheetTime.FormatWithZone(ticket.Created, zone ?? TimeZoneInfo.Utc)).Append(" — created\n");
@@ -389,19 +394,38 @@ namespace Noogen.Backlog
             return builder.ToString();
         }
 
-        /// <summary>The one body section the CLI will rewrite. See <see cref="ReplaceSection"/>.</summary>
+        /// <summary>The body sections the CLI will rewrite. See <see cref="ReplaceSection"/>.</summary>
         public const string DescriptionHeading = "Description";
+
+        /// <summary>
+        /// The second one. It is here for the reason the first is: without a CLI path to it, the
+        /// only way to write acceptance criteria was to open the document in Docs — so a ticket
+        /// filed by an agent kept its placeholder, and every reader downstream was told a ticket
+        /// was ready when nobody had said what "done" meant.
+        /// </summary>
+        public const string AcceptanceCriteriaHeading = "Acceptance Criteria";
+
+        /// <summary>
+        /// What the Acceptance Criteria section says until someone writes it. A checklist item
+        /// rather than bare prose, so the section starts in the shape it is meant to end up in.
+        /// </summary>
+        public const string UnwrittenCriteria = "- [ ] *TODO*";
 
         /// <summary>
         /// Replaces the text under one heading, and touches nothing else in the body.
         ///
-        /// This is the one exception to "the store never rewrites prose", and it is deliberately
-        /// the *narrowest* one that closes the gap: without it a description could only be seeded
-        /// at <c>new</c> and never corrected from the CLI. It is bounded the same way
+        /// This is the exception to "the store never rewrites prose", and it is deliberately the
+        /// *narrowest* one that closes the gap: without it a description could only be seeded at
+        /// <c>new</c> and never corrected from the CLI. It is bounded the same way
         /// <see cref="AppendActivity"/> is — by a heading a person can see. The section ends at the
-        /// next heading of the same level or higher, so Acceptance Criteria, Notes, the Activity
-        /// Log, and any section a human added come through byte-identical, and a `###` subheading
-        /// *inside* the description is part of it rather than the end of it.
+        /// next heading of the same level or higher, so Notes, the Activity Log, and any section a
+        /// human added come through byte-identical, and a `###` subheading *inside* the section is
+        /// part of it rather than the end of it.
+        ///
+        /// It is used for exactly two headings, <see cref="DescriptionHeading"/> and
+        /// <see cref="AcceptanceCriteriaHeading"/>, and the caller names which — the sections the
+        /// CLI is expected to author. Every other heading stays hands-off, and adding a third here
+        /// means deciding again that a machine should be allowed to overwrite it.
         ///
         /// A missing heading inserts one at the top rather than failing or guessing at which
         /// existing section was meant. Insertion cannot eat anything, which is the property that

@@ -218,14 +218,21 @@ namespace Noogen.Backlog.Cli
 
                 CAPTURE AND EDIT
                   new --title "..." [--type feature] [--area A] [--owner O]
-                      [--bv N --tc N --rroe N --size N] [--description "..."]
+                      [--bv N --tc N --rroe N --size N]
+                      [--description "..."] [--acceptance-criteria "..."]
                   edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
                        [--description "..."]             Replaces the Description section
+                       [--acceptance-criteria "..."]     Replaces the Acceptance Criteria section
 
-                  Prose given as --description goes through the shell, which on Windows will
-                  split the value at an embedded double quote. For anything longer than a line:
-                    --description-file body.md           Read the description from a file
+                  Those two sections are the only prose the tool writes, and a ticket filed
+                  without them says *TODO* until somebody fills them in — write the criteria as
+                  a `- [ ] ...` checklist. Prose given inline goes through the shell, which on
+                  Windows splits the value at an embedded double quote, so for anything longer
+                  than a line use either of:
+                    --description-file body.md           Read the section from a file
                     --description -                      Read it from standard input
+                  Both spellings exist for --acceptance-criteria too, and only one option per
+                  command may read standard input.
                   e.g.  Get-Content body.md -Raw | backlog new --title "..." --description -
                   score <id> [--bv N] [--tc N] [--rroe N] [--size N]
                   note <id> --text "..."                  Append to the Activity Log

@@ -27,6 +27,8 @@ namespace Noogen.Backlog.Tests
 
         static string? Describe(params string[] args) => TextInput.ReadDescription(CommandLine.Parse(args));
 
+        static string? Criteria(params string[] args) => TextInput.ReadAcceptanceCriteria(CommandLine.Parse(args));
+
         // --- the file path ---
 
         [Fact]
@@ -111,6 +113,69 @@ namespace Noogen.Backlog.Tests
                     || exception.Message.Contains("empty", StringComparison.Ordinal),
                 exception.Message);
         }
+
+        // --- acceptance criteria, which take the same three paths ---
+        //
+        // A checklist is the prose most likely to span lines, so the file and pipe paths matter
+        // here more than anywhere — and it is the section agents used to leave as *TODO* because
+        // nothing on the command line could reach it.
+
+        [Fact]
+        public void ReadAcceptanceCriteria_FromAFile_ReturnsEveryLine()
+        {
+            var criteria = "- [ ] doctor reports the duplicate\n- [ ] the row survives a restart";
+            var path = Write("ac.md", criteria);
+
+            Assert.Equal(criteria, Criteria("new", "--title", "probe", "--acceptance-criteria-file", path));
+        }
+
+        [Fact]
+        public void ReadAcceptanceCriteria_NeitherFlag_IsNullSoTheSectionIsLeftAlone() =>
+            Assert.Null(Criteria("edit", "NG-12", "--description", "why"));
+
+        [Fact]
+        public void ReadAcceptanceCriteria_InlineValue_IsUsedVerbatim() =>
+            Assert.Equal("- [ ] it works", Criteria("edit", "NG-12", "--acceptance-criteria", "- [ ] it works"));
+
+        [Fact]
+        public void ReadAcceptanceCriteria_BothFlags_RefusesAndNamesThem()
+        {
+            var path = Write("ac.md", "from the file");
+
+            var exception = Assert.Throws<UsageException>(
+                () => Criteria("new", "--acceptance-criteria", "inline", "--acceptance-criteria-file", path));
+
+            Assert.Contains("--acceptance-criteria-file", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("not both", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void ReadAcceptanceCriteria_EmptyFile_RefusesRatherThanWritingNothing()
+        {
+            var path = Write("empty.md", "  \n");
+
+            Assert.Throws<UsageException>(() => Criteria("edit", "NG-12", "--acceptance-criteria-file", path));
+        }
+
+        /// <summary>
+        /// There is one pipe. The second reader would find it drained and report "came back
+        /// empty", which names the wrong problem — so the combination is refused up front.
+        /// </summary>
+        [Fact]
+        public void RejectSharedStandardInput_BothSectionsPiped_RefusesAndNamesBoth()
+        {
+            var exception = Assert.Throws<UsageException>(() => TextInput.RejectSharedStandardInput(
+                CommandLine.Parse(["new", "--title", "x", "--description", "-", "--acceptance-criteria", "-"])));
+
+            Assert.Contains("--description", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("--acceptance-criteria", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("standard input", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void RejectSharedStandardInput_OnlyOneSectionPiped_IsAccepted() =>
+            TextInput.RejectSharedStandardInput(
+                CommandLine.Parse(["new", "--title", "x", "--description", "-", "--acceptance-criteria-file", "ac.md"]));
 
         // --- decoding ---
         //
