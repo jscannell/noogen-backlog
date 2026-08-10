@@ -36,7 +36,7 @@ namespace Noogen.Backlog.Tests
             Assert.Contains("--json", exception.Message, StringComparison.Ordinal);
         }
 
-        /// <summary>An option with no value parses as a flag, and must be checked the same way.</summary>
+        /// <summary>A valueless flag is checked the same way as an option that carries one.</summary>
         [Fact]
         public void Validate_ValuelessFlagFromAnotherVerb_Refuses()
         {
@@ -206,6 +206,10 @@ namespace Noogen.Backlog.Tests
         [InlineData("score", "NG-12", "5")]
         [InlineData("list", "backlog")]
         [InlineData("doctor", "extra", "--json")]
+        // NG-0058: behind a valueless flag the positional used to be eaten as that flag's value,
+        // so this line reported success, printed human output, and dropped 'extra' unseen.
+        [InlineData("doctor", "--json", "extra")]
+        [InlineData("start", "--force", "NG-12", "stray")]
         public void Validate_PositionalNoVerbReads_Refuses(params string[] args) => Reject(args);
     }
 }

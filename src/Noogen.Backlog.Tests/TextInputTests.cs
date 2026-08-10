@@ -88,7 +88,11 @@ namespace Noogen.Backlog.Tests
             Assert.Contains("not both", exception.Message, StringComparison.Ordinal);
         }
 
-        /// <summary>A bare `--description` parses as a valueless flag; reading it as "no change" is the no-op.</summary>
+        /// <summary>
+        /// A bare `--description` is refused by the parser now (NG-0058) rather than by a special
+        /// case here — but reading it as "no change" is the silent no-op either way, so the
+        /// guarantee is pinned from this side too.
+        /// </summary>
         [Fact]
         public void ReadDescription_FlagWithNoValue_Refuses() =>
             Assert.Throws<UsageException>(() => Describe("edit", "NG-12", "--description"));

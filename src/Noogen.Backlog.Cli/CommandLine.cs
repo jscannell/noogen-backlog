@@ -6,6 +6,21 @@ namespace Noogen.Backlog.Cli
     /// Deliberately tiny argument parsing: `backlog &lt;verb&gt; [positionals] [--option value] [--flag]`.
     /// A dependency-free parser keeps the tool a single fast binary, which matters when an agent
     /// shells out to it several times in a turn.
+    ///
+    /// <b>The shape of every name is declared, never inferred.</b> This used to read <c>--name</c>
+    /// and then look at what followed: a non-<c>--</c> argument became its value, anything else
+    /// made it a valueless flag. Nothing said which of the two a name was meant to be, so every
+    /// wrong guess failed silently — <c>--json</c> swallowed the argument after it and stopped
+    /// being set, a value beginning with two dashes could not be passed, and an option typed with
+    /// its value missing became a flag nobody reads. <see cref="Verbs.TakesValue"/> answers from
+    /// the table instead, which makes all three decidable: a flag never consumes what follows it,
+    /// an option with nothing to take is a usage error naming itself, and the argument after an
+    /// option is its value even when it begins with two dashes.
+    ///
+    /// The one thing an option will not take as its value is another option <em>this verb reads</em>.
+    /// <c>note NG-1 --text --json</c> is a person who forgot the text, not a note that says
+    /// "--json", and silently binding it there would put the machine contract back exactly where
+    /// this change found it. <c>--text=--json</c> says it on purpose.
     /// </summary>
     public class CommandLine
     {
@@ -32,6 +47,20 @@ namespace Noogen.Backlog.Cli
 
         public bool Json => HasFlag("json");
 
+        /// <summary>
+        /// Whether JSON was asked for, read straight off the raw arguments. A command line that
+        /// <see cref="Parse"/> refuses never becomes a <see cref="CommandLine"/> to ask, and the
+        /// machine contract has to hold for that failure too — it is the one an agent shelling out
+        /// is most likely to meet.
+        /// </summary>
+        public static bool WantsJson(string[] args) =>
+            args.Any(argument =>
+                argument.Equals("--json", StringComparison.OrdinalIgnoreCase)
+                || argument.StartsWith("--json=", StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>Everything after this is positional, whatever it looks like.</summary>
+        public const string EndOfOptions = "--";
+
         public static CommandLine Parse(string[] args)
         {
             var command = new CommandLine();
@@ -41,13 +70,21 @@ namespace Noogen.Backlog.Cli
 
             command.Verb = args[0].TrimStart('-').ToLowerInvariant();
 
+            var positionalsOnly = false;
+
             for (var i = 1; i < args.Length; i++)
             {
                 var argument = args[i];
 
-                if (!argument.StartsWith("--", StringComparison.Ordinal))
+                if (positionalsOnly || !argument.StartsWith("--", StringComparison.Ordinal))
                 {
                     command._positionals.Add(argument);
+                    continue;
+                }
+
+                if (argument == EndOfOptions)
+                {
+                    positionalsOnly = true;
                     continue;
                 }
 
@@ -58,26 +95,72 @@ namespace Noogen.Backlog.Cli
                 {
                     var value = name[(equals + 1)..];
                     name = name[..equals];
-                    command._options[name] = value;
                     command._names.Add(name);
+
+                    // A flag given a value is the same silent no-op from the other direction:
+                    // `--force=true` would land in _options, HasFlag would stay false, and the
+                    // command would run without the thing that was asked for.
+                    if (Verbs.IsFlag(command.Verb, name))
+                    {
+                        throw new UsageException(
+                            $"--{name} carries no value, so '{argument}' asks for something that does not exist. "
+                            + $"Write --{name} on its own.");
+                    }
+
+                    command._options[name] = value;
                     continue;
                 }
 
                 command._names.Add(name);
 
-                var hasValue = i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal);
-                if (hasValue)
-                {
-                    command._options[name] = args[i + 1];
-                    i++;
-                }
-                else
+                // An undeclared name is left as a flag on purpose. It cannot be read anyway —
+                // Verbs.Validate is about to refuse it — and consuming the next argument would
+                // hide a positional that the error should be naming instead.
+                if (!Verbs.TakesValue(command.Verb, name))
                 {
                     command._flags.Add(name);
+                    continue;
                 }
+
+                var next = i + 1 < args.Length ? args[i + 1] : null;
+
+                if (next is null || next == EndOfOptions || IsOptionOf(command.Verb, next))
+                    throw new UsageException(MissingValue(command.Verb, name, next));
+
+                command._options[name] = next;
+                i++;
             }
 
             return command;
+        }
+
+        /// <summary>Whether <paramref name="argument"/> spells an option <paramref name="verb"/> reads.</summary>
+        static bool IsOptionOf(string verb, string argument)
+        {
+            if (!argument.StartsWith("--", StringComparison.Ordinal))
+                return false;
+
+            var name = argument[2..];
+            var equals = name.IndexOf('=');
+
+            return Verbs.Accepts(verb, equals >= 0 ? name[..equals] : name);
+        }
+
+        /// <summary>
+        /// Names the option, what was found instead of its value, and the one spelling that passes
+        /// a value the parser would otherwise read as an option.
+        /// </summary>
+        static string MissingValue(string verb, string name, string? next)
+        {
+            var found = next switch
+            {
+                null => "nothing follows it",
+                EndOfOptions => $"'{EndOfOptions}' ends the options",
+                _ => $"'{next}' is another option '{verb}' reads"
+            };
+
+            return $"--{name} takes a value, and {found}. "
+                + $"If the value really does begin with two dashes, write --{name}=<value>.";
         }
 
         public bool HasFlag(string name) => _flags.Contains(name);

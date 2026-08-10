@@ -40,8 +40,9 @@ namespace Noogen.Backlog.Cli
             if (!inline)
                 return null;
 
-            // RequireOption, not Option: a bare `--description` parses as a valueless flag, and
-            // reading it as "not given" would be the silent no-op this flag exists to end.
+            // No guard against a bare `--description` here any more: Verbs declares it as an
+            // option that takes a value, so the parser refuses one without and this is only ever
+            // reached with the value in hand.
             var value = command.RequireOption("description");
 
             return value == StandardInput ? Read(value, "--description") : value;

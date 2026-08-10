@@ -18,6 +18,9 @@ namespace Noogen.Backlog.Cli
     /// <c>Positionals[0]</c> and nothing looked at the rest, so a description that the shell had
     /// torn into fragments arrived as extra positionals, was dropped, and the command exited 0
     /// with a truncated ticket. <see cref="Validate"/> now rejects the ones no verb reads.
+    ///
+    /// The table declares each name's <em>shape</em> as well, and <see cref="CommandLine"/> parses
+    /// from that rather than guessing. See <see cref="Valueless"/>.
     /// </summary>
     public static class Verbs
     {
@@ -69,6 +72,27 @@ namespace Noogen.Backlog.Cli
         };
 
         /// <summary>
+        /// The names that carry no value. Everything else a verb accepts takes one.
+        ///
+        /// Without this the parser had to guess from the next argument, and it guessed wrong three
+        /// ways. <c>doctor --json extra</c> bound <c>extra</c> to <c>--json</c>, so the flag went
+        /// unset, human output was printed under the machine contract, and the stray positional
+        /// NG-0045 exists to refuse was never seen as one. A value beginning with two dashes could
+        /// not be passed at all. And <c>edit NG-12 --title</c> became a valueless flag named
+        /// <c>title</c>, which reads as "leave the title alone" — the same silent no-op this table
+        /// was written to end.
+        ///
+        /// Shape is a property of the name, not of the verb: <c>--force</c> means the same thing on
+        /// <c>start</c> and on <c>install-skill</c>, and a name that took a value on one verb and
+        /// none on another would be a trap for anyone reading a command line. So it is one set
+        /// beside <see cref="Accepted"/> rather than a second spelling of every entry in it.
+        /// </summary>
+        static readonly HashSet<string> Valueless = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "json", "utc", "force"
+        };
+
+        /// <summary>
         /// The verbs that take a ticket id. It is the only positional argument in the surface, so
         /// this is the whole arity table: every other verb takes none.
         /// </summary>
@@ -93,6 +117,25 @@ namespace Noogen.Backlog.Cli
             ["new:status"] = Lifecycle,
             ["new:phase"] = Lifecycle
         };
+
+        /// <summary>
+        /// Whether <paramref name="verb"/> reads an option called <paramref name="name"/> at all.
+        /// False for a name nobody declared, which is what makes an unknown option inert at parse
+        /// time: it consumes nothing, so the argument behind it is still there for
+        /// <see cref="Validate"/> to see and report.
+        /// </summary>
+        public static bool Accepts(string verb, string name) =>
+            Modifiers.Contains(name, StringComparer.OrdinalIgnoreCase)
+            || (Accepted.TryGetValue(verb, out var accepted)
+                && accepted.Contains(name, StringComparer.OrdinalIgnoreCase));
+
+        /// <summary>Whether <c>--name</c> is followed by its value on this verb.</summary>
+        public static bool TakesValue(string verb, string name) =>
+            Accepts(verb, name) && !Valueless.Contains(name);
+
+        /// <summary>Whether <c>--name</c> is one of the valueless flags this verb reads.</summary>
+        public static bool IsFlag(string verb, string name) =>
+            Accepts(verb, name) && Valueless.Contains(name);
 
         /// <summary>
         /// Rejects anything this verb does not read, in the order it was typed. Called before the

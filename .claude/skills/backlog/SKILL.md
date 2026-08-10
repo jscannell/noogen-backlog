@@ -96,6 +96,11 @@ Every verb rejects an option it does not read and any positional argument beyond
 (exit 2, kind `usage`), so a flag borrowed from another verb — or a fragment of a value the shell
 split — fails loudly rather than being ignored.
 
+An option that takes a value must be given one: a bare `--title` is an error, not "leave the title
+alone", and an option will not swallow another option as its value (`note NG-12 --text --json`
+errors instead of writing a note that says `--json`). To pass a value that genuinely begins with
+two dashes, join it with `=`: `--title=--draft`.
+
 ## Rules
 
 1. **Archive, never delete.** `backlog archive` moves the row and the document. Nothing is ever

@@ -428,6 +428,14 @@ Each verb declares the options it reads, and an option it does not read is a **u
 command goes on to succeed at doing nothing, and reports it. Where the flag is one people
 reasonably reach for, the error says what to do instead rather than only listing what is accepted.
 
+The declaration includes each option's *shape*, so the parser never guesses one. A valueless flag
+— `--json`, `--utc`, `--force` — does not consume the argument after it; an option that takes a
+value and is given none is a usage error naming itself, rather than turning into a flag nobody
+reads and leaving the field alone; and the argument after an option is its value even when it
+begins with two dashes. The one thing an option will not take is another option the same verb
+reads: `note NG-12 --text --json` is someone who forgot the text, not a note that says `--json`,
+so it errors. If a value really does start with two dashes, write it as `--text=--json`.
+
 The same goes for positional arguments. A verb takes a ticket id or nothing, and anything past
 that is refused — because the usual way an extra one appears is a value the shell tore in half.
 Windows hands a native process one command-line string; PowerShell quotes an argument containing

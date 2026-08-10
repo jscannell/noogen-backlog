@@ -6,50 +6,55 @@ namespace Noogen.Backlog.Cli
     {
         public static async Task<int> Main(string[] args)
         {
-            var command = CommandLine.Parse(args);
+            // Parsing is inside the try because it can now refuse the line itself — an option
+            // declared to take a value and given none is a usage error rather than a flag nothing
+            // reads. That leaves no CommandLine to ask about --json, which is why Fail also gets
+            // the raw arguments.
+            CommandLine? command = null;
 
             try
             {
+                command = CommandLine.Parse(args);
                 return await RunAsync(command);
             }
             catch (UsageException exception)
             {
-                Fail(command, "usage", exception.Message);
+                Fail(command, args, "usage", exception.Message);
                 return 2;
             }
             catch (WipLimitExceededException exception)
             {
-                Fail(command, "wip-limit", exception.Message);
+                Fail(command, args, "wip-limit", exception.Message);
                 return 1;
             }
             catch (BacklogTransitionException exception)
             {
-                Fail(command, "illegal-transition", exception.Message);
+                Fail(command, args, "illegal-transition", exception.Message);
                 return 1;
             }
             catch (KeyNotFoundException exception)
             {
-                Fail(command, "not-found", exception.Message);
+                Fail(command, args, "not-found", exception.Message);
                 return 1;
             }
             catch (NotSignedInException exception)
             {
-                Fail(command, "not-signed-in", exception.Message);
+                Fail(command, args, "not-signed-in", exception.Message);
                 return 3;
             }
             catch (OAuthClientNotConfiguredException exception)
             {
-                Fail(command, "oauth-client-missing", exception.Message);
+                Fail(command, args, "oauth-client-missing", exception.Message);
                 return 3;
             }
             catch (OAuthClientInvalidException exception)
             {
-                Fail(command, "oauth-client-invalid", exception.Message);
+                Fail(command, args, "oauth-client-invalid", exception.Message);
                 return 3;
             }
             catch (Exception exception) when (GoogleRateLimit.IsRateLimited(exception))
             {
-                Fail(command, "rate-limited",
+                Fail(command, args, "rate-limited",
                     "Google is rate limiting requests to this backlog, and the command kept being refused after " +
                     "several waits. Nothing was half-written — a rate-limited request is rejected, not applied. " +
                     "Wait a minute and run it again; if it persists, someone may be running a large 'reindex' or " +
@@ -58,17 +63,17 @@ namespace Noogen.Backlog.Cli
             }
             catch (ArgumentException exception)
             {
-                Fail(command, "invalid-argument", exception.Message);
+                Fail(command, args, "invalid-argument", exception.Message);
                 return 1;
             }
             catch (FormatException exception)
             {
-                Fail(command, "malformed", exception.Message);
+                Fail(command, args, "malformed", exception.Message);
                 return 1;
             }
             catch (Exception exception)
             {
-                Fail(command, "error", exception.Message);
+                Fail(command, args, "error", exception.Message);
                 return 1;
             }
         }
@@ -173,9 +178,9 @@ namespace Noogen.Backlog.Cli
                 config.RequireSpreadsheetId());
         }
 
-        static void Fail(CommandLine command, string kind, string message)
+        static void Fail(CommandLine? command, string[] args, string kind, string message)
         {
-            if (command.Json)
+            if (command?.Json ?? CommandLine.WantsJson(args))
             {
                 Output.WriteJson(new Dictionary<string, string>
                 {
