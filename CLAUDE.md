@@ -142,6 +142,24 @@ These are the things to be careful about; most of the design follows from them.
      must not come back is a *silent* placeholder: `new` names the sections it left unwritten, on
      stderr, because stdout under `--json` is one document.
 
+     `edit --note` is not a third: it is the same `AppendActivity`, opt-in, carrying the caller's
+     own words the way `archive --note` always has. An edit still writes no log entry on its own —
+     Docs' revision history is what recovers an overwrite, and "description edited" would add
+     nothing to it. What `--note` removes is the second round trip against a document that was
+     just written.
+
+   Reading is the counterpart, and it is bounded by the same rule. `SectionOf` walks the section
+   boundaries through the *same* `FindSection` as `ReplaceSection`, so a reader and a writer can
+   never disagree about which lines belong to a human — that is why the walk is one private method
+   and not two loops. `show --section` exists so that read-before-write costs one section rather
+   than a whole document.
+
+   **`TrimActivityLog` is display only, and must never reach a write.** `show` calls it to drop
+   all but the last few log entries; the log is the only prose record of a ticket's life, so a
+   trimmed body sent to `UpdateDocAsync` would delete history nothing else holds — the
+   unrecoverable failure this invariant exists to prevent. It is called from the `show` command and
+   nowhere else, and adding a second caller means proving that caller never writes.
+
    Everything else about the body stays hands-off. In particular this is not licence to
    "normalise" prose — see invariant 18. Blanking either section is refused rather than treated as
    a clear: every editable *field* is a scalar the Sheet also holds, so emptying one loses
@@ -267,7 +285,11 @@ These are the things to be careful about; most of the design follows from them.
 
 - No tuples. No primary constructors. No `is { }` pattern.
 - Interface-typed collection properties; `[JsonIgnore(WhenWritingDefault)]` on JSON output models.
-- Every command supports `--json`; that is the agent contract, so keep the shapes stable.
+- Every command supports `--json`; that is the agent contract, so keep the shapes stable. It is
+  emitted **compact** — an agent pays for indentation and gets nothing back, and whitespace was
+  never part of what the shapes promise. Narrowing is the caller's to ask for: `--fields` on the
+  list-shaped verbs, `--section` on `show`. Both are projections, so they must not invent a key —
+  a field a ticket does not carry stays absent rather than becoming null.
 - Every verb declares the options it reads in `Verbs`, and an undeclared option is a usage error.
   The parser collects any `--name`, so a flag nothing reads is invisible: the command runs, does
   nothing, and reports success. Adding a flag to a command means adding it to that table too.

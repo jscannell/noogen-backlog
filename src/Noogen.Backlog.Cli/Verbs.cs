@@ -42,8 +42,14 @@ namespace Noogen.Backlog.Cli
             "size", "job-size"
         ];
 
-        /// <summary>What <c>Commands.BuildFilter</c> reads, for the three verbs that call it.</summary>
-        static readonly string[] FilterFlags = ["area", "owner", "top"];
+        /// <summary>
+        /// What <c>Commands.BuildFilter</c> reads, for the three verbs that call it.
+        ///
+        /// <c>--fields</c> is here rather than beside <c>--json</c> in <see cref="Modifiers"/>
+        /// because it narrows a ticket projection, and these are the verbs that return a list of
+        /// them. On <c>show</c> the equivalent is <c>--section</c>, which narrows the body instead.
+        /// </summary>
+        static readonly string[] FilterFlags = ["area", "owner", "top", "fields"];
 
         /// <summary>
         /// The prose sections the CLI authors, each with the two spellings that never reach the
@@ -68,9 +74,9 @@ namespace Noogen.Backlog.Cli
             ["next"] = FilterFlags,
             ["wip"] = FilterFlags,
             ["flow"] = ["since"],
-            ["show"] = [],
+            ["show"] = ["section", "full"],
             ["new"] = ["title", "type", "area", "owner", .. ProseFlags, .. ScoreFlags],
-            ["edit"] = ["title", "area", "owner", "type", .. ProseFlags],
+            ["edit"] = ["title", "area", "owner", "type", "note", .. ProseFlags],
             ["score"] = [.. ScoreFlags],
             ["note"] = ["text"],
             ["start"] = ["owner", "force"],
@@ -101,7 +107,7 @@ namespace Noogen.Backlog.Cli
         /// </summary>
         static readonly HashSet<string> Valueless = new(StringComparer.OrdinalIgnoreCase)
         {
-            "json", "utc", "force"
+            "json", "utc", "force", "full"
         };
 
         /// <summary>

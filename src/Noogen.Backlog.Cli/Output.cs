@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Noogen.Providers.GoogleWorkspace;
 
@@ -15,7 +16,12 @@ namespace Noogen.Backlog.Cli
     {
         static readonly JsonSerializerOptions Json = new()
         {
-            WriteIndented = true,
+            // Not indented, deliberately. The agent reading this pays for every byte, and
+            // indentation is a quarter of a list response — 22,598 characters of `list --json`
+            // over a 44-ticket backlog, of which 5,284 were spaces and newlines. Whitespace was
+            // never part of the contract the shapes promise, so compacting costs nothing; pipe
+            // through a formatter when reading one of these by hand.
+            WriteIndented = false,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
 
@@ -26,6 +32,73 @@ namespace Noogen.Backlog.Cli
         };
 
         public static void WriteJson(object payload) => Console.WriteLine(JsonSerializer.Serialize(payload, Json));
+
+        /// <summary>
+        /// The names <c>--fields</c> accepts, taken from <see cref="TicketView"/> itself rather
+        /// than listed here, so a property added there is selectable the same day. They are the
+        /// names as they appear on the wire, which is what the caller has in front of them.
+        /// </summary>
+        static readonly HashSet<string> TicketFieldNames = new(
+            typeof(TicketView)
+                .GetProperties()
+                .Where(property => property.CanRead)
+                .Select(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name)),
+            StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Reads a <c>--fields</c> value into the set <see cref="Project"/> keeps, or null for
+        /// "everything". An unrecognised name is a usage error naming the alternatives: the whole
+        /// point of the option is to ask for less, and silently ignoring a typo would answer with
+        /// a column the caller did not get and cannot see is missing.
+        /// </summary>
+        public static IReadOnlySet<string>? ParseFields(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            var names = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+            if (names.Length == 0)
+                throw new UsageException("--fields needs at least one name. It accepts: " + KnownFields() + ".");
+
+            var unknown = names.Where(name => !TicketFieldNames.Contains(name)).ToList();
+
+            if (unknown.Count > 0)
+                throw new UsageException(
+                    $"--fields does not know {string.Join(", ", unknown.Select(name => "'" + name + "'"))}. "
+                    + "It accepts: " + KnownFields() + ".");
+
+            return new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+        }
+
+        static string KnownFields() =>
+            string.Join(", ", typeof(TicketView)
+                .GetProperties()
+                .Where(property => property.CanRead)
+                .Select(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name)));
+
+        /// <summary>
+        /// A ticket as JSON, narrowed to the named fields. Null keeps everything.
+        ///
+        /// It projects the serialised node rather than a hand-written dictionary so the shapes
+        /// stay identical to an unprojected response — same casing, same null-elision, same
+        /// values. Asking for a field a given ticket does not carry leaves it absent, exactly as
+        /// it would be without <c>--fields</c>: absent still means absent.
+        /// </summary>
+        public static JsonNode Project(TicketView view, IReadOnlySet<string>? fields)
+        {
+            var node = JsonSerializer.SerializeToNode(view, Json)!;
+
+            if (fields is null)
+                return node;
+
+            var projected = node.AsObject();
+
+            foreach (var key in projected.Select(pair => pair.Key).Where(key => !fields.Contains(key)).ToList())
+                projected.Remove(key);
+
+            return projected;
+        }
 
         public static void WriteLine(string text = "") => Console.WriteLine(text);
 

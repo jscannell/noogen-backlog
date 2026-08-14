@@ -295,7 +295,8 @@ namespace Noogen.Backlog.Cli
 
             if (command.Json)
             {
-                Output.WriteJson(tickets.Select(ticket => TicketView.From(ticket)).ToList());
+                var fields = Output.ParseFields(command.Option("fields"));
+                Output.WriteJson(tickets.Select(ticket => Output.Project(TicketView.From(ticket), fields)).ToList());
                 return 0;
             }
 
@@ -325,7 +326,8 @@ namespace Noogen.Backlog.Cli
 
             if (command.Json)
             {
-                Output.WriteJson(tickets.Select(ticket => TicketView.From(ticket)).ToList());
+                var fields = Output.ParseFields(command.Option("fields"));
+                Output.WriteJson(tickets.Select(ticket => Output.Project(TicketView.From(ticket), fields)).ToList());
                 return 0;
             }
 
@@ -353,12 +355,16 @@ namespace Noogen.Backlog.Cli
 
             if (command.Json)
             {
+                var fields = Output.ParseFields(command.Option("fields"));
+
                 Output.WriteJson(new Dictionary<string, object>
                 {
                     ["wipLimit"] = settings.WipLimit,
                     ["inFlight"] = tickets.Count,
                     ["agingThresholdDays"] = threshold ?? 0,
-                    ["tickets"] = tickets.Select(ticket => TicketView.From(ticket, now, threshold)).ToList()
+                    ["tickets"] = tickets
+                        .Select(ticket => Output.Project(TicketView.From(ticket, now, threshold), fields))
+                        .ToList()
                 });
                 return 0;
             }
@@ -419,7 +425,7 @@ namespace Noogen.Backlog.Cli
             var id = command.RequirePositional(0, "a ticket id");
 
             var ticket = await store.GetAsync(id) ?? throw new KeyNotFoundException($"No ticket '{id}'.");
-            var body = await store.GetBodyAsync(id);
+            var body = Narrow(command, await store.GetBodyAsync(id));
 
             if (command.Json)
             {
@@ -451,6 +457,40 @@ namespace Noogen.Backlog.Cli
             Output.WriteLine();
             Output.WriteLine(body);
             return 0;
+        }
+
+        /// <summary>How many Activity Log entries <c>show</c> keeps unless asked for all of them.</summary>
+        const int ActivityLogEntriesShown = 3;
+
+        /// <summary>
+        /// What of the body <c>show</c> prints. Display only — this never touches what is stored,
+        /// and nothing here may be handed to a write. See <see cref="TicketDocument.TrimActivityLog"/>.
+        ///
+        /// The default trims the Activity Log because it is the part that grows without bound:
+        /// every lifecycle event appends a line, so on a ticket that has been worked it is most of
+        /// the document, and it is rarely what the reader came for. The recent entries are, so
+        /// those are the ones kept.
+        ///
+        /// <c>--section</c> narrows to one heading instead, which is what a read-before-write
+        /// wants: a prose option replaces a whole section, so the caller needs that section and
+        /// nothing else. Asking for the log by name gives it whole — trimming what was explicitly
+        /// requested would be answering a different question.
+        /// </summary>
+        static string Narrow(CommandLine command, string body)
+        {
+            var section = command.Option("section");
+
+            if (!string.IsNullOrWhiteSpace(section))
+            {
+                var heading = section.Replace('-', ' ').Trim();
+
+                return TicketDocument.SectionOf(body, heading)
+                    ?? throw new UsageException(
+                        $"This ticket has no '{heading}' section. It has: "
+                        + $"{string.Join(", ", TicketDocument.HeadingsOf(body))}.");
+            }
+
+            return command.Has("full") ? body : TicketDocument.TrimActivityLog(body, ActivityLogEntriesShown);
         }
 
         // --- capture and edit ---
@@ -522,7 +562,8 @@ namespace Noogen.Backlog.Cli
                 Owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : null,
                 Type = command.Has("type") ? Vocabulary.Parse<TicketType>(command.RequireOption("type"), "type") : null,
                 Description = TextInput.ReadDescription(command),
-                AcceptanceCriteria = TextInput.ReadAcceptanceCriteria(command)
+                AcceptanceCriteria = TextInput.ReadAcceptanceCriteria(command),
+                Note = command.Option("note")
             };
 
             var ticket = await store.UpdateAsync(id, edit);

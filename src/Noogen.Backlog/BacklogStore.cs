@@ -142,11 +142,12 @@ namespace Noogen.Backlog
         {
             RequireProse(edit.Description, "A description", nameof(edit));
             RequireProse(edit.AcceptanceCriteria, "Acceptance criteria", nameof(edit));
+            RequireProse(edit.Note, "A note", nameof(edit));
 
             var location = await RequireAsync(id, cancellationToken);
             var ticket = location.Ticket;
 
-            var prose = edit.Description is not null || edit.AcceptanceCriteria is not null;
+            var prose = edit.Description is not null || edit.AcceptanceCriteria is not null || edit.Note is not null;
 
             // A row with no document is damage doctor reports, and rewriting a section of nothing
             // would be the silent no-op an edit must never be.
@@ -173,7 +174,8 @@ namespace Noogen.Backlog
                 new BodyEdit
                 {
                     Description = edit.Description?.Trim(),
-                    AcceptanceCriteria = edit.AcceptanceCriteria?.Trim()
+                    AcceptanceCriteria = edit.AcceptanceCriteria?.Trim(),
+                    Note = edit.Note?.Trim()
                 },
                 cancellationToken);
         }

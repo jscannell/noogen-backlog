@@ -18,8 +18,11 @@ This is the part most often got wrong. The numbers mean nothing on their own —
 something *against the other items in the queue*. Two consequences:
 
 - In each column, the smallest item should be a **1**. If nothing is a 1, everything is inflated.
-- Before scoring, run `backlog list --json` and calibrate against items already scored. A new
-  item's business value of 8 should be genuinely comparable to the other 8s.
+- Before scoring, run `backlog list --top 15` and calibrate against items already scored. A new
+  item's business value of 8 should be genuinely comparable to the other 8s. The top of the queue
+  is what you are calibrating against, so the whole list is rarely worth pulling — and if you need
+  the individual dimensions rather than the WSJF totals, ask for them:
+  `backlog list --top 15 --json --fields id,bv,tc,rroe,size,title`.
 
 The gaps in the scale are deliberate. Being forced to choose between 5 and 8 — with no 6 or 7 —
 is what stops everything drifting to the middle.

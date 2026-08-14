@@ -443,19 +443,7 @@ namespace Noogen.Backlog
             var lines = (body ?? string.Empty).Replace("\r\n", "\n").Split('\n');
             var replacement = (text ?? string.Empty).Replace("\r\n", "\n").Trim('\n');
 
-            var start = -1;
-            var level = 0;
-
-            for (var index = 0; index < lines.Length && start < 0; index++)
-            {
-                var found = HeadingLevel(lines[index]);
-
-                if (found > 0 && string.Equals(HeadingText(lines[index], found), heading, StringComparison.OrdinalIgnoreCase))
-                {
-                    start = index;
-                    level = found;
-                }
-            }
+            FindSection(lines, heading, out var start, out var end);
 
             var rebuilt = new List<string>();
 
@@ -468,20 +456,6 @@ namespace Noogen.Backlog
                 rebuilt.AddRange(lines);
 
                 return Join(rebuilt);
-            }
-
-            // A heading of the same level or higher ends the section; a deeper one is inside it.
-            var end = lines.Length;
-
-            for (var index = start + 1; index < lines.Length; index++)
-            {
-                var found = HeadingLevel(lines[index]);
-
-                if (found > 0 && found <= level)
-                {
-                    end = index;
-                    break;
-                }
             }
 
             rebuilt.AddRange(lines[..(start + 1)]);
@@ -498,6 +472,148 @@ namespace Noogen.Backlog
         }
 
         static string Join(IEnumerable<string> lines) => string.Join('\n', lines).Trim('\n') + "\n";
+
+        /// <summary>
+        /// Where a section starts and ends: <paramref name="start"/> is the index of its heading
+        /// line, or -1 if the heading is not there, and <paramref name="end"/> is the exclusive
+        /// index of the line that ends it.
+        ///
+        /// This is the one definition of where a section ends — "the next heading of the same
+        /// level or higher, so a `###` inside it is part of it rather than the end of it" — and
+        /// both <see cref="ReplaceSection"/> and <see cref="SectionOf"/> go through it. Two copies
+        /// of that rule would be two chances to disagree about which lines belong to a human,
+        /// which is the mistake the rule exists to prevent.
+        /// </summary>
+        static void FindSection(string[] lines, string heading, out int start, out int end)
+        {
+            start = -1;
+            end = lines.Length;
+
+            var level = 0;
+
+            for (var index = 0; index < lines.Length && start < 0; index++)
+            {
+                var found = HeadingLevel(lines[index]);
+
+                if (found > 0 && string.Equals(HeadingText(lines[index], found), heading, StringComparison.OrdinalIgnoreCase))
+                {
+                    start = index;
+                    level = found;
+                }
+            }
+
+            if (start < 0)
+                return;
+
+            // A heading of the same level or higher ends the section; a deeper one is inside it.
+            for (var index = start + 1; index < lines.Length; index++)
+            {
+                var found = HeadingLevel(lines[index]);
+
+                if (found > 0 && found <= level)
+                {
+                    end = index;
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// One section of the body, its heading included, or null when the body has no such
+        /// heading. Read-only, and the counterpart to <see cref="ReplaceSection"/>: it uses the
+        /// same boundaries, so what comes back is exactly what a replacement would overwrite.
+        ///
+        /// It exists so that reading before a write does not cost the whole document. A prose
+        /// option replaces an entire section, so the caller has to know what is already there —
+        /// but only for the section it is about to rewrite, and on a long-lived ticket the
+        /// Activity Log is most of the body.
+        /// </summary>
+        public static string? SectionOf(string body, string heading)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(heading);
+
+            var lines = (body ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+
+            FindSection(lines, heading, out var start, out var end);
+
+            return start < 0 ? null : Join(lines[start..end]);
+        }
+
+        /// <summary>
+        /// The headings the body actually has, in order, so a caller who asked for a section that
+        /// is not there can be told what is. A ticket may carry sections a person added, so the
+        /// answer has to come from the document rather than from a list of the ones we know about.
+        /// </summary>
+        public static IReadOnlyList<string> HeadingsOf(string body)
+        {
+            var headings = new List<string>();
+
+            foreach (var line in (body ?? string.Empty).Replace("\r\n", "\n").Split('\n'))
+            {
+                var level = HeadingLevel(line);
+
+                if (level > 0)
+                    headings.Add(HeadingText(line, level));
+            }
+
+            return headings;
+        }
+
+        /// <summary>The headings <see cref="SectionOf"/> is asked for by name most often.</summary>
+        public const string NotesHeading = "Notes";
+
+        /// <summary>See <see cref="AppendActivity"/>; spelled without the `##` for section lookup.</summary>
+        public const string ActivityLogHeading = "Activity Log";
+
+        /// <summary>
+        /// The body with all but the last <paramref name="keep"/> Activity Log entries replaced by
+        /// a line saying how many were dropped.
+        ///
+        /// **This is for display only, and must never reach a write.** The log is the narrative
+        /// record of a ticket's life and the only place lifecycle events are kept in prose; a
+        /// trimmed body sent to <c>UpdateDocAsync</c> would destroy history that nothing else
+        /// holds. It is called from the <c>show</c> command and nowhere else, and it stays that
+        /// way — invariant 9 exists because eating a human's writing is the one unrecoverable
+        /// failure here, and silently discarding the log would be exactly that.
+        ///
+        /// An entry is a line beginning with "- "; a line that does not is a continuation of the
+        /// entry above it, so an entry a person wrapped — or that came back from Docs reflowed —
+        /// is never cut in half.
+        /// </summary>
+        public static string TrimActivityLog(string body, int keep)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(keep);
+
+            var lines = (body ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+
+            FindSection(lines, ActivityLogHeading, out var start, out var end);
+
+            if (start < 0)
+                return Join(lines);
+
+            // Index of the first line of each entry, in order.
+            var entries = new List<int>();
+
+            for (var index = start + 1; index < end; index++)
+            {
+                if (lines[index].StartsWith("- ", StringComparison.Ordinal))
+                    entries.Add(index);
+            }
+
+            if (entries.Count <= keep)
+                return Join(lines);
+
+            var dropped = entries.Count - keep;
+            var firstKept = entries[dropped];
+
+            var rebuilt = new List<string>();
+            rebuilt.AddRange(lines[..(start + 1)]);
+            rebuilt.Add(string.Empty);
+            rebuilt.Add($"- *… {dropped} earlier {(dropped == 1 ? "entry" : "entries")}; run `backlog show <id> --full` for all of them.*");
+            rebuilt.AddRange(lines[firstKept..]);
+
+            return Join(rebuilt);
+        }
 
         /// <summary>
         /// The `#` count of a markdown heading line, or 0 for a line that is not one. The space is
@@ -517,7 +633,7 @@ namespace Noogen.Backlog
 
         static string HeadingText(string line, int level) => line.TrimStart()[level..].Trim();
 
-        const string ActivityHeading = "## Activity Log";
+        const string ActivityHeading = "## " + ActivityLogHeading;
 
         /// <summary>
         /// Appends a log entry rendered in the backlog's timezone. This is prose for people, never

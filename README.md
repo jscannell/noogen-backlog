@@ -391,14 +391,17 @@ Overridable by `NOOGEN_BACKLOG_SPREADSHEET_ID`, `NOOGEN_BACKLOG_DRIVE_ID`, `NOOG
 backlog list [--area A] [--owner O] [--top N]   # the queue, rank order
 backlog next [--owner me]                       # highest-ranked item
 backlog wip [--owner O]                         # in flight, oldest first, flags aging
-backlog show <id>
+backlog show <id> [--section S] [--full]        # one ticket and its body
 backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
+
+# list, next and wip take --fields to narrow the --json projection:
+#   backlog list --top 10 --json --fields id,wsjf,title
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
             [--bv N --tc N --rroe N --size N]
             [--description "..."] [--acceptance-criteria "..."]
 backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
-                  [--description "..."] [--acceptance-criteria "..."]
+                  [--description "..."] [--acceptance-criteria "..."] [--note "..."]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."
 
@@ -421,6 +424,37 @@ backlog doctor | backlog reindex
 
 Every command accepts `--json`. That flag is the machine contract, and it is what makes the tool
 usable by agents: the skill teaches the CLI surface, not the storage layout.
+
+### Asking for less
+
+An agent pays for every byte it reads back, and the backlog's answers are large: a bare
+`list --json` over forty-odd tickets is around 17,000 characters, most of which the question did
+not need. Three options narrow it, and the skill teaches all three.
+
+`--fields` narrows the `--json` projection on `list`, `next` and `wip` to the columns named —
+`--fields id,wsjf,title` is a third the size of the whole thing. The names are the ones that appear
+on the wire, they are taken from the projection itself rather than a list kept alongside it, and an
+unrecognised one is a usage error listing the real ones. Asking for a field a particular ticket
+does not carry leaves it absent, exactly as it would be without the option: absent means absent.
+
+On `show`, `--section` does the same to the body — `--section description`, `acceptance-criteria`,
+`notes`, `activity-log`, or any heading the document actually has. This is what you want before
+rewriting a section, because a prose option replaces the whole thing and you need to know what is
+there now. Reading one section is a tenth of reading the document.
+
+And `show` **trims the Activity Log** to its last three entries by default, with a line saying how
+many it left out. The log grows by one line for every lifecycle event and never shrinks, so on a
+ticket that has been worked for a while it is most of the document — and it is rarely what the
+reader came for. `--full` prints all of it. Asking for it by name with `--section activity-log`
+also gives it whole; trimming what was explicitly requested would answer a different question.
+
+The trim is **display only**. Nothing on a write path ever sees a shortened body: the log is the
+only prose record of a ticket's life, and storing a trimmed copy would destroy history that nothing
+else holds. `TicketDocument.TrimActivityLog` is called from the `show` command and nowhere else.
+
+`--json` itself is not indented, for the same reason — the whitespace was a quarter of a list
+response and was never part of what the shapes promise. Pipe it through a formatter to read one by
+hand.
 
 Verbs *are* the transitions — there is deliberately no `--status` flag to pass an illegal value
 to, and `edit --status` errors with a pointer to the right verb.
@@ -475,9 +509,16 @@ only runs on input UTF-8 could not have produced.
 rewrites — Notes, the Activity Log, and any section someone added come back byte-identical, and a
 `###` subheading inside one stays part of it. A document with no such heading gains one rather
 than having a section guessed at. Blanking is refused: `--description ""` errors instead of
-emptying the section, because Docs' revision history is the only way back from an overwrite. For
-the same reason neither writes an Activity Log entry — if the change is worth recording, say so
-with `note`.
+emptying the section, because Docs' revision history is the only way back from an overwrite.
+
+Because a replacement needs the current text, `show --section description` reads back exactly what
+a replacement would overwrite — the same boundary walk answers both, so the two cannot disagree
+about where a section ends.
+
+An edit still does not log itself: a log entry saying "description edited" would say nothing Docs'
+revision history does not already hold. When the change *is* worth recording, `edit --note "..."`
+carries the line in the same write, rather than costing a second command and a second round trip
+against the document that was just saved.
 
 Acceptance criteria are a flag rather than something only Docs can supply because leaving them to
 Docs meant they never got written. A ticket filed without them carries `- [ ] *TODO*`, and

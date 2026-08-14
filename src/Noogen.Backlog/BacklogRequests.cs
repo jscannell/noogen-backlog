@@ -52,6 +52,17 @@ namespace Noogen.Backlog
         /// Blank is refused for the same reason a blank description is.
         /// </summary>
         public string? AcceptanceCriteria { get; set; }
+
+        /// <summary>
+        /// A line for the Activity Log, or null for none. Opt-in, and the caller's own words.
+        ///
+        /// An edit does not record itself: Docs' revision history is what recovers an overwrite,
+        /// and a log entry saying "description edited" would say nothing that history does not.
+        /// But when the change *is* worth recording, saying so used to mean a second command and
+        /// a second round trip against Drive for the same document. This carries it in the write
+        /// that is already happening.
+        /// </summary>
+        public string? Note { get; set; }
     }
 
     public class TicketFilter

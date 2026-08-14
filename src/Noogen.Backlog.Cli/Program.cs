@@ -206,8 +206,12 @@ namespace Noogen.Backlog.Cli
                 QUEUE
                   list [--area A] [--owner O] [--top N]   Unstarted work in rank order
                   next [--owner me]                       Highest-ranked item(s)
-                  show <id>                               One ticket, with its body
+                  show <id> [--section S] [--full]        One ticket, with its body
                   flow [--since 90d]                      Throughput and cycle-time p50/p85
+
+                  show trims the Activity Log to the last few entries; --full prints all of
+                  them, and --section description (or acceptance-criteria, notes, activity-log)
+                  prints just that one — which is what you want before rewriting it.
 
                 WORK IN FLIGHT
                   wip [--owner O]                         In Progress, oldest first, with aging
@@ -223,6 +227,7 @@ namespace Noogen.Backlog.Cli
                   edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
                        [--description "..."]             Replaces the Description section
                        [--acceptance-criteria "..."]     Replaces the Acceptance Criteria section
+                       [--note "..."]                    Also log why, in the same write
 
                   Those two sections are the only prose the tool writes, and a ticket filed
                   without them says *TODO* until somebody fills them in — write the criteria as
@@ -254,7 +259,8 @@ namespace Noogen.Backlog.Cli
                   reindex                                 Rebuild rows from their documents
 
                 Every command accepts --json for machine-readable output, which is always UTC.
-                Human output uses the backlog's configured timezone; --utc shows UTC instead.
+                On list, next and wip, --fields id,wsjf,title narrows it to the columns you
+                asked for. Human output uses the backlog's configured timezone; --utc shows UTC.
                 WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20. The score flags are
                 also spelled out: --business-value, --time-criticality, --risk-opportunity,
                 --job-size.
