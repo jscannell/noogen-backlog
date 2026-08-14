@@ -25,6 +25,7 @@ Work moves through three Kanban columns, and **the tab a ticket lives on is its 
 backlog list [--area A] [--owner O] [--top N]   # the queue, rank order
 backlog next [--owner me]                       # highest-ranked item
 backlog wip [--owner O]                         # in flight, oldest first, flags aging
+backlog find "<text>" [--area A] [--top N]      # search every tab, names and prose
 backlog show <id> [--section S] [--full]        # one ticket and its body
 backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
@@ -62,12 +63,42 @@ depending on how you ask, so ask narrowly:
   question genuinely spans the whole backlog.
 - **Human output is the default.** The table carries the same facts as `--json` at a quarter of the
   size, and you can read it. Reach for `--json` only when you need a field the table does not show
-  — then narrow it: `--fields id,wsjf,title` on `list`, `next`, and `wip`.
+  — then narrow it: `--fields id,wsjf,title` on `list`, `next`, `wip`, and `find`.
+- **Looking for a particular ticket is `find`, never `list`.** Pulling the whole queue to string-match
+  it yourself costs ~4,300 tokens, misses everything in flight or archived, and cannot see prose at
+  all. `find "rate limit"` costs a fraction of that and searches all three tabs.
 - **`show` before an edit is `show --section`.** `--section description`,
   `--section acceptance-criteria`, `--section notes`, `--section activity-log`, or any heading the
   document has. One section instead of a whole document.
 - **`show` trims the Activity Log** to the last few entries; on a ticket that has been worked, the
   log is most of the body. `--full` prints all of it and is rarely what you want.
+
+## Search before you file
+
+`backlog new` will happily file the ticket that already exists. **Run `find` first** whenever you
+are about to file something, or whenever you are asked whether the backlog covers a topic. It is
+the only verb that spans all three tabs and the only one that reads a ticket's prose.
+
+```
+backlog find "rate limit"
+backlog find "rate limit" --json --fields id,title,phase,match
+```
+
+Every hit says which of two sources matched, and they behave differently:
+
+- **`name`** — a substring of the id, title, area or owner, from the index. Exact and immediate, so
+  a ticket filed a minute ago is found by its title.
+- **`body`** — the document's text, from Drive's full-text index. This is the only way to reach a
+  description or acceptance criteria, and it has three limits: it matches **whole words**
+  (`find limit` does not match *limiting*), it may **not yet know** about a document written in the
+  last few minutes, and it searches the **whole document** including the Activity Log.
+
+So a `find` that returns nothing means "no ticket names this and no indexed document contains this
+word" — not "no such ticket". If a search comes back empty and you are unsure, try the distinctive
+noun on its own rather than a phrase, and say what you searched for when you report the result.
+
+The search text is one positional argument, so quote it. If the shell splits it the command exits 2
+rather than searching for a fragment.
 
 ## Do not verify writes
 

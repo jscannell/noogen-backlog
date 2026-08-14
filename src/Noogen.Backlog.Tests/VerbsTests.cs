@@ -227,10 +227,51 @@ namespace Noogen.Backlog.Tests
         [InlineData("archive", "NG-12")]
         public void Validate_TheOneTicketIdAVerbReads_IsAccepted(params string[] args) => Accept(args);
 
+        // --- find ---
+
+        [Theory]
+        [InlineData("find", "rate limiter")]
+        [InlineData("find", "rate limiter", "--top", "5")]
+        [InlineData("find", "rate limiter", "--area", "platform", "--json")]
+        [InlineData("find", "rate limiter", "--fields", "id,title,match")]
+        public void Validate_Find_TakesTheSearchTextAndTheFilterFlags(params string[] args) => Accept(args);
+
+        /// <summary>
+        /// A search string is the value most likely to be typed as a quoted phrase, so it is the
+        /// one PowerShell is most likely to tear apart — and a surviving fragment is still a legal
+        /// search, which is what makes the split invisible without this.
+        /// </summary>
+        [Fact]
+        public void Validate_FindWithASplitSearchString_RefusesAndSaysItMustBeOneArgument()
+        {
+            var exception = Reject("find", "the sign-in ", "flow", " thing");
+
+            Assert.Contains("'find' takes some text to search for and nothing else positional", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("one argument", exception.Message, StringComparison.Ordinal);
+        }
+
+        /// <summary>find writes no prose, so it must not be told where prose belongs.</summary>
+        [Fact]
+        public void Validate_FindWithAnExtraArgument_OmitsTheProseAdvice()
+        {
+            var exception = Reject("find", "widget", "stray");
+
+            Assert.DoesNotContain("--description", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Validate_ProseOptionOnFind_Refuses()
+        {
+            var exception = Reject("find", "widget", "--description", "x");
+
+            Assert.Contains("'find' does not accept --description", exception.Message, StringComparison.Ordinal);
+        }
+
         [Theory]
         [InlineData("show", "NG-12", "NG-13")]
         [InlineData("score", "NG-12", "5")]
         [InlineData("list", "backlog")]
+        [InlineData("find", "widget", "extra")]
         [InlineData("doctor", "extra", "--json")]
         // NG-0058: behind a valueless flag the positional used to be eaten as that flag's value,
         // so this line reported success, printed human output, and dropped 'extra' unseen.

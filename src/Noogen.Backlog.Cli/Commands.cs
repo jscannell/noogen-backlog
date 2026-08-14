@@ -397,6 +397,53 @@ namespace Noogen.Backlog.Cli
             return 0;
         }
 
+        /// <summary>
+        /// The only verb that reads a ticket's prose without being told which ticket. It spans all
+        /// three tabs deliberately — "have we discussed this before?" is most often answered by
+        /// something already archived, and every other query verb is scoped to one column.
+        /// </summary>
+        public async Task<int> FindAsync(CommandLine command)
+        {
+            var store = await StoreAsync();
+            var text = command.RequirePositional(0, "some text to search for");
+
+            var matches = await store.SearchAsync(text, BuildFilter(command));
+
+            if (command.Json)
+            {
+                var fields = Output.ParseFields(command.Option("fields"));
+                Output.WriteJson(matches.Select(match => Output.Project(TicketView.From(match, Now), fields)).ToList());
+                return 0;
+            }
+
+            if (matches.Count == 0)
+            {
+                Output.WriteLine($"Nothing matched '{text}'.");
+
+                // Both halves of "no results" that are not "no such ticket", said once, here,
+                // because this is the moment somebody is about to conclude the ticket does not
+                // exist and file it again.
+                Output.WriteLine("Names match on any fragment, but document text matches whole words only, "
+                    + "and a document written in the last few minutes may not be indexed yet.");
+                return 0;
+            }
+
+            Output.WriteTable(
+                ["id", "match", "phase", "wsjf", "area", "owner", "title"],
+                matches.Select(match => (IReadOnlyList<string>)
+                [
+                    match.Ticket.Id,
+                    string.Join("+", match.Where),
+                    Vocabulary.ToWire(match.Ticket.Phase),
+                    Output.Number(match.Ticket.Score.Value),
+                    Output.Text(match.Ticket.Area),
+                    Output.Text(match.Ticket.Owner),
+                    match.Ticket.Title
+                ]).ToList());
+
+            return 0;
+        }
+
         public async Task<int> FlowAsync(CommandLine command)
         {
             var store = await StoreAsync();

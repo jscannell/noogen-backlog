@@ -355,6 +355,52 @@ namespace Noogen.Backlog.Tests
             return Task.FromResult<IReadOnlyList<DriveEntry>>(children);
         }
 
+        /// <summary>
+        /// Every <c>SearchTextAsync</c> call, so a test can assert the drive it was confined to.
+        /// </summary>
+        public List<string?> SearchDriveIds { get; } = [];
+
+        /// <summary>Set to make the fake behave like Drive's index before it has caught up.</summary>
+        public bool SearchFindsNothing { get; set; }
+
+        /// <summary>
+        /// Whole-word matching, because that is what Drive does and a fake that matched substrings
+        /// would let a test pass that the real index would fail. Splitting on non-alphanumerics
+        /// mirrors how Drive tokenises, so `sign-in` is indexed as `sign` and `in`.
+        /// </summary>
+        public Task<IReadOnlyList<DriveEntry>> SearchTextAsync(string text, string? mimeType, string? driveId, CancellationToken cancellationToken = default)
+        {
+            SearchDriveIds.Add(driveId);
+
+            if (SearchFindsNothing)
+                return Task.FromResult<IReadOnlyList<DriveEntry>>([]);
+
+            var terms = Tokenize(text);
+
+            var hits = _nodes.Values
+                .Where(node => mimeType is null || node.MimeType == mimeType)
+                .Where(node => terms.Count > 0 && terms.All(term => Tokenize(node.Content).Contains(term)))
+                .Select(node => new DriveEntry { Id = node.Id, Name = node.Name })
+                .ToList();
+
+            return Task.FromResult<IReadOnlyList<DriveEntry>>(hits);
+        }
+
+        static HashSet<string> Tokenize(string text)
+        {
+            var words = text.Split(
+                [' ', '\t', '\r', '\n', '-', '_', '.', ',', ':', ';', '!', '?', '(', ')', '[', ']', '*', '#', '/', '\\', '"', '\'', '`', '|', '<', '>', '=', '+'],
+                StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+            return new HashSet<string>(words, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>The whole fake is one drive, named so a test can assert the query was confined.</summary>
+        public string? DriveId { get; set; } = "shared-drive-1";
+
+        public Task<string?> GetDriveIdAsync(string fileId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(DriveId);
+
         public Task<string> CreateFolderAsync(string parentId, string name, CancellationToken cancellationToken = default) =>
             Task.FromResult(Add(parentId, name, DriveGateway.FolderMimeType, string.Empty));
 

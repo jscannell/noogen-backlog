@@ -31,8 +31,7 @@ namespace Noogen.Providers.GoogleWorkspace
 
         public async Task<string?> FindChildAsync(string parentId, string name, string? mimeType, CancellationToken cancellationToken = default)
         {
-            var escaped = name.Replace("\\", "\\\\").Replace("'", "\\'");
-            var query = $"'{parentId}' in parents and name = '{escaped}' and trashed = false";
+            var query = $"'{parentId}' in parents and name = '{Escape(name)}' and trashed = false";
             if (!string.IsNullOrEmpty(mimeType))
                 query += $" and mimeType = '{mimeType}'";
 
@@ -46,12 +45,41 @@ namespace Noogen.Providers.GoogleWorkspace
             return response.Files.Count > 0 ? response.Files[0].Id : null;
         }
 
-        public async Task<IReadOnlyList<DriveEntry>> ListChildrenAsync(string parentId, string? mimeType, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<DriveEntry>> ListChildrenAsync(string parentId, string? mimeType, CancellationToken cancellationToken = default)
         {
             var query = $"'{parentId}' in parents and trashed = false";
             if (!string.IsNullOrEmpty(mimeType))
                 query += $" and mimeType = '{mimeType}'";
 
+            return PageAsync(query, null, cancellationToken);
+        }
+
+        public Task<IReadOnlyList<DriveEntry>> SearchTextAsync(string text, string? mimeType, string? driveId, CancellationToken cancellationToken = default)
+        {
+            var query = $"fullText contains '{Escape(text)}' and trashed = false";
+            if (!string.IsNullOrEmpty(mimeType))
+                query += $" and mimeType = '{mimeType}'";
+
+            // corpora=drive is what confines the sweep to the backlog. The scope this tool asks
+            // for is full Drive (see GoogleWorkspaceScopes), so an unqualified fullText query
+            // would rummage through everything the signed-in person can read — slow, and a
+            // surprise. driveId is null only for a backlog rooted in My Drive, where there is no
+            // enclosure to name.
+            return PageAsync(
+                query,
+                request =>
+                {
+                    if (string.IsNullOrEmpty(driveId))
+                        return;
+
+                    request.Corpora = "drive";
+                    request.DriveId = driveId;
+                },
+                cancellationToken);
+        }
+
+        async Task<IReadOnlyList<DriveEntry>> PageAsync(string query, Action<FilesResource.ListRequest>? configure, CancellationToken cancellationToken)
+        {
             var entries = new List<DriveEntry>();
             string? pageToken = null;
 
@@ -63,6 +91,7 @@ namespace Noogen.Providers.GoogleWorkspace
                 request.PageSize = 200;
                 request.PageToken = pageToken;
                 ApplySharedDriveSupport(request);
+                configure?.Invoke(request);
 
                 var response = await request.ExecuteAsync(cancellationToken);
 
@@ -178,6 +207,16 @@ namespace Noogen.Providers.GoogleWorkspace
             return file.WebViewLink;
         }
 
+        public async Task<string?> GetDriveIdAsync(string fileId, CancellationToken cancellationToken = default)
+        {
+            var request = Service.Files.Get(fileId);
+            request.Fields = "driveId";
+            request.SupportsAllDrives = true;
+
+            var file = await request.ExecuteAsync(cancellationToken);
+            return file.DriveId;
+        }
+
         public async Task<DriveFileTimes> GetTimestampsAsync(string fileId, CancellationToken cancellationToken = default)
         {
             var request = Service.Files.Get(fileId);
@@ -192,6 +231,14 @@ namespace Noogen.Providers.GoogleWorkspace
                 ModifiedTime = file.ModifiedTimeDateTimeOffset
             };
         }
+
+        /// <summary>
+        /// Makes a value safe to sit inside the single quotes of a Drive query term. Backslash
+        /// first, or the escape it adds would itself be escaped. A ticket title is untrusted
+        /// input and reaches this through search, so an unescaped apostrophe would end the term
+        /// early and hand the rest of the string to Drive as query syntax.
+        /// </summary>
+        static string Escape(string value) => value.Replace("\\", "\\\\").Replace("'", "\\'");
 
         static void ApplySharedDriveSupport(FilesResource.ListRequest request)
         {

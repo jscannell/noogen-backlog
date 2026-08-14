@@ -11,6 +11,30 @@ namespace Noogen.Providers.GoogleWorkspace
         /// <summary>Immediate children only. Used by doctor to spot documents with no index row.</summary>
         Task<IReadOnlyList<DriveEntry>> ListChildrenAsync(string parentId, string? mimeType, CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Files whose *indexed content* matches <paramref name="text"/> — the only way to reach
+        /// the prose inside a ticket, which the Sheet does not hold.
+        ///
+        /// Scoped by <paramref name="driveId"/> rather than by parent folder, and that is not a
+        /// shortcut: <c>in parents</c> matches immediate children only, and archived documents sit
+        /// two levels down under year and quarter, so a parent-scoped query would quietly answer
+        /// for active tickets alone. A shared drive is the smallest enclosure that contains the
+        /// whole backlog. Passing null searches everything the credential can see, which is what a
+        /// backlog rooted in My Drive gets; the caller is expected to intersect the results with
+        /// something authoritative either way.
+        ///
+        /// Three properties of Drive's index that callers have to design around: it matches whole
+        /// terms rather than substrings, it is eventually consistent so a just-written document may
+        /// not be found, and it indexes the entire document including anything appended to it.
+        /// </summary>
+        Task<IReadOnlyList<DriveEntry>> SearchTextAsync(string text, string? mimeType, string? driveId, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// The shared drive a file lives on, or null if it is in My Drive. Used to confine a
+        /// <see cref="SearchTextAsync"/> sweep to the backlog's own drive.
+        /// </summary>
+        Task<string?> GetDriveIdAsync(string fileId, CancellationToken cancellationToken = default);
+
         Task<string> CreateFolderAsync(string parentId, string name, CancellationToken cancellationToken = default);
 
         Task<string> CreateSpreadsheetAsync(string parentId, string name, CancellationToken cancellationToken = default);

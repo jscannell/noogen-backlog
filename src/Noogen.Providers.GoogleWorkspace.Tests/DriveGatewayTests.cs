@@ -130,6 +130,118 @@ namespace Noogen.Providers.GoogleWorkspace.Tests
         }
 
         [Fact]
+        public async Task SearchTextAsync_Always_QueriesTheFullTextIndexAndExcludesTheTrash()
+        {
+            var handler = StubHttpHandler.Returning("""{ "files": [] }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            await gateway.SearchTextAsync("rate limit", null, null);
+
+            Assert.Equal("fullText contains 'rate limit' and trashed = false", handler.LastRequest.Parameter("q"));
+        }
+
+        [Fact]
+        public async Task SearchTextAsync_MimeTypeGiven_ConstrainsTheQueryToIt()
+        {
+            var handler = StubHttpHandler.Returning("""{ "files": [] }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            await gateway.SearchTextAsync("rate limit", DriveGateway.DocumentMimeType, null);
+
+            Assert.Contains($"mimeType = '{DriveGateway.DocumentMimeType}'", handler.LastRequest.Parameter("q"), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task SearchTextAsync_TextContainsAnApostrophe_EscapesItRatherThanClosingTheLiteral()
+        {
+            // The search string is the most directly user-supplied value this tool puts into a
+            // Drive query — it is typed at the command line and goes straight through.
+            var handler = StubHttpHandler.Returning("""{ "files": [] }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            await gateway.SearchTextAsync(@"Jason's a\b", null, null);
+
+            Assert.Contains(@"fullText contains 'Jason\'s a\\b'", handler.LastRequest.Parameter("q"), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task SearchTextAsync_DriveIdGiven_ConfinesTheSweepToThatSharedDrive()
+        {
+            // The tool holds full Drive scope, so without this the query rummages through
+            // everything the signed-in person can read.
+            var handler = StubHttpHandler.Returning("""{ "files": [] }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            await gateway.SearchTextAsync("rate limit", null, "drive-9");
+
+            Assert.Equal("drive", handler.LastRequest.Parameter("corpora"));
+            Assert.Equal("drive-9", handler.LastRequest.Parameter("driveId"));
+        }
+
+        [Fact]
+        public async Task SearchTextAsync_NoDriveId_LeavesTheCorpusUnrestricted()
+        {
+            // A backlog rooted in My Drive has no shared drive to name, and asking for corpora
+            // without a driveId is an error rather than a wider search.
+            var handler = StubHttpHandler.Returning("""{ "files": [] }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            await gateway.SearchTextAsync("rate limit", null, null);
+
+            Assert.Null(handler.LastRequest.Parameter("corpora"));
+            Assert.Null(handler.LastRequest.Parameter("driveId"));
+        }
+
+        [Fact]
+        public async Task SearchTextAsync_Always_AsksDriveToSearchSharedDrives()
+        {
+            var handler = StubHttpHandler.Returning("""{ "files": [] }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            await gateway.SearchTextAsync("rate limit", null, null);
+
+            Assert.Equal("true", handler.LastRequest.Parameter("supportsAllDrives"));
+            Assert.Equal("true", handler.LastRequest.Parameter("includeItemsFromAllDrives"));
+        }
+
+        [Fact]
+        public async Task SearchTextAsync_ResponseIsPaged_FollowsEveryPage()
+        {
+            // A broad term over a large backlog pages, and a hit dropped here reads as "no such
+            // ticket" — the answer that makes somebody file a duplicate.
+            var handler = new StubHttpHandler(
+                StubResponse.Json("""{ "nextPageToken": "page-2", "files": [ { "id": "a", "name": "NG-1" } ] }"""),
+                StubResponse.Json("""{ "files": [ { "id": "b", "name": "NG-2" } ] }"""));
+
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            var entries = await gateway.SearchTextAsync("rate limit", null, null);
+
+            Assert.Equal(["a", "b"], entries.Select(entry => entry.Id));
+            Assert.Equal("page-2", handler.LastRequest.Parameter("pageToken"));
+        }
+
+        [Fact]
+        public async Task GetDriveIdAsync_FileIsOnASharedDrive_ReturnsTheDriveId()
+        {
+            var handler = StubHttpHandler.Returning("""{ "driveId": "drive-9" }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            Assert.Equal("drive-9", await gateway.GetDriveIdAsync(ParentId));
+            Assert.Equal("driveId", handler.LastRequest.Parameter("fields"));
+        }
+
+        [Fact]
+        public async Task GetDriveIdAsync_FileIsInMyDrive_ReturnsNull()
+        {
+            // Drive omits driveId entirely for a file that is not on a shared drive.
+            var handler = StubHttpHandler.Returning("""{ "id": "folder-1" }""");
+            var gateway = new DriveGateway(new StubDriveClientFactory(handler));
+
+            Assert.Null(await gateway.GetDriveIdAsync(ParentId));
+        }
+
+        [Fact]
         public async Task CreateFolderAsync_Always_CreatesAFolderUnderTheParent()
         {
             var handler = StubHttpHandler.Returning("""{ "id": "folder-2" }""");

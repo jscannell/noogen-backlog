@@ -85,6 +85,40 @@ namespace Noogen.Backlog
         }
     }
 
+    /// <summary>
+    /// One search hit, and where the text was found. The two sources answer different questions
+    /// and fail in different ways, so which one matched is part of the answer rather than an
+    /// implementation detail: a name hit is exact and current, a body hit came from an index that
+    /// lags and matches whole words.
+    /// </summary>
+    public class TicketMatch
+    {
+        public Ticket Ticket { get; set; } = null!;
+
+        /// <summary>Matched the id, title, area or owner the Sheet holds.</summary>
+        public bool InName { get; set; }
+
+        /// <summary>Matched the text of the document, via Drive's full-text index.</summary>
+        public bool InBody { get; set; }
+
+        /// <summary>Where it hit, in the order a reader should weigh them.</summary>
+        public IReadOnlyList<string> Where
+        {
+            get
+            {
+                var where = new List<string>();
+
+                if (InName)
+                    where.Add("name");
+
+                if (InBody)
+                    where.Add("body");
+
+                return where;
+            }
+        }
+    }
+
     public class DoctorIssue
     {
         public string Id { get; set; } = string.Empty;

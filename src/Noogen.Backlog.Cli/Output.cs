@@ -225,6 +225,13 @@ namespace Noogen.Backlog.Cli
 
         public string? DocUrl { get; set; }
 
+        /// <summary>
+        /// Where a search hit — `name`, `body`, or both. Absent on every other verb, the same way
+        /// <see cref="Aging"/> is absent outside `wip`: a ticket does not have a match, a search
+        /// result does.
+        /// </summary>
+        public IReadOnlyList<string>? Match { get; set; }
+
         public static TicketView From(Ticket ticket, DateTimeOffset? now = null, double? agingThreshold = null)
         {
             var view = new TicketView
@@ -262,6 +269,14 @@ namespace Noogen.Backlog.Cli
                 if (agingThreshold.HasValue && view.AgeDays.HasValue)
                     view.Aging = view.AgeDays.Value > agingThreshold.Value;
             }
+
+            return view;
+        }
+
+        public static TicketView From(TicketMatch match, DateTimeOffset? now = null)
+        {
+            var view = From(match.Ticket, now);
+            view.Match = match.Where;
 
             return view;
         }

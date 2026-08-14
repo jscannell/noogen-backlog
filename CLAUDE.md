@@ -281,6 +281,25 @@ These are the things to be careful about; most of the design follows from them.
     stdout under `--json` is one document. When the retries run out the CLI reports
     `rate-limited` and exits 4.
 
+20. **Search reads two sources, and the join is on `Drive File ID`.** The Sheet holds the names and
+    no prose; Drive's index holds the prose and lags. `find` matches names as substrings across all
+    three tabs, asks Drive for the rest, and unions them — reporting on every hit which half
+    matched, because the two are trusted differently.
+
+    Neither half is optional. Drive is the *only* route to a description or acceptance criteria, and
+    it is eventually consistent — the ticket filed a minute ago, which is precisely the one a
+    duplicate check is looking for, may not be indexed yet. It also matches whole terms, so `limit`
+    misses *limiting*. The Sheet half covers both gaps, and covers nothing Drive covers well.
+
+    Two things to hold. The union joins on the document id, never on the file's name: the name
+    happens to start with the ticket id, but the Sheet is what *owns* the mapping (invariant 8), and
+    joining there is also what drops a Drive hit on something that is not a ticket. And the Drive
+    query is scoped by `corpora=drive`, **never by parent folder** — `in parents` matches immediate
+    children only, and an archived document lives two levels down under year and quarter, so a
+    parent-scoped query silently answers for active tickets alone. It cannot be left unscoped
+    either: the credential holds full Drive (invariant 17's scope note), so an unqualified
+    `fullText` query sweeps everything the signed-in person can read.
+
 ## Conventions
 
 - No tuples. No primary constructors. No `is { }` pattern.

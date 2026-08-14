@@ -73,6 +73,7 @@ namespace Noogen.Backlog.Cli
             ["list"] = FilterFlags,
             ["next"] = FilterFlags,
             ["wip"] = FilterFlags,
+            ["find"] = FilterFlags,
             ["flow"] = ["since"],
             ["show"] = ["section", "full"],
             ["new"] = ["title", "type", "area", "owner", .. ProseFlags, .. ScoreFlags],
@@ -111,13 +112,32 @@ namespace Noogen.Backlog.Cli
         };
 
         /// <summary>
-        /// The verbs that take a ticket id. It is the only positional argument in the surface, so
-        /// this is the whole arity table: every other verb takes none.
+        /// The verbs that take one positional argument, and what it is. Every other verb takes
+        /// none, so this is the whole arity table.
+        ///
+        /// The description is here rather than at the call site because <see cref="Unexpected"/>
+        /// needs it too: the error for a second positional has to name what the first one was
+        /// meant to be, and a verb that reads free text rather than a ticket id would otherwise be
+        /// described wrongly by a message that assumed every positional was an id.
         /// </summary>
-        static readonly HashSet<string> TakesTicketId = new(StringComparer.OrdinalIgnoreCase)
+        static readonly Dictionary<string, string> Positional = new(StringComparer.OrdinalIgnoreCase)
         {
-            "show", "edit", "score", "note", "start", "block", "unblock", "review", "archive", "restore"
+            ["show"] = "a ticket id",
+            ["edit"] = "a ticket id",
+            ["score"] = "a ticket id",
+            ["note"] = "a ticket id",
+            ["start"] = "a ticket id",
+            ["block"] = "a ticket id",
+            ["unblock"] = "a ticket id",
+            ["review"] = "a ticket id",
+            ["archive"] = "a ticket id",
+            ["restore"] = "a ticket id",
+            ["find"] = "some text to search for"
         };
+
+        /// <summary>What <paramref name="verb"/>'s positional argument is, or null if it takes none.</summary>
+        public static string? PositionalOf(string verb) =>
+            Positional.TryGetValue(verb, out var description) ? description : null;
 
         const string Lifecycle =
             "There is no --status flag: the tab a ticket lives on is its state. " +
@@ -182,7 +202,7 @@ namespace Noogen.Backlog.Cli
                 throw new UsageException($"'{command.Verb}' does not accept --{name}. {detail}");
             }
 
-            var allowed = TakesTicketId.Contains(command.Verb) ? 1 : 0;
+            var allowed = Positional.ContainsKey(command.Verb) ? 1 : 0;
 
             if (command.Positionals.Count > allowed)
                 throw new UsageException(Unexpected(command, accepted, command.Positionals[allowed]));
@@ -196,14 +216,24 @@ namespace Noogen.Backlog.Cli
         /// </summary>
         static string Unexpected(CommandLine command, string[] accepted, string extra)
         {
-            var shape = TakesTicketId.Contains(command.Verb)
-                ? "takes a ticket id and nothing else positional"
+            var shape = Positional.TryGetValue(command.Verb, out var description)
+                ? $"takes {description} and nothing else positional"
                 : "takes no positional arguments";
 
-            var advice = accepted.Contains("description", StringComparer.OrdinalIgnoreCase)
-                ? " Prose is safest given as --description-file <path>, or --description - to read it from stdin; "
-                    + "neither goes through the command line."
-                : string.Empty;
+            var advice = command.Verb switch
+            {
+                _ when accepted.Contains("description", StringComparer.OrdinalIgnoreCase) =>
+                    " Prose is safest given as --description-file <path>, or --description - to read it from stdin; "
+                    + "neither goes through the command line.",
+
+                // The verb most likely to be handed a quoted phrase, and the one where a split is
+                // least visible: the surviving fragment is still a legal search and still finds
+                // something, so the answer looks fine and is to a different question.
+                "find" => " The search text has to arrive as one argument. A single term usually "
+                    + "finds more than a phrase does, because Drive matches whole words.",
+
+                _ => string.Empty
+            };
 
             return $"'{command.Verb}' {shape}, and got '{extra}'. "
                 + "If that is a fragment of something you passed, the shell split the value: a double quote "

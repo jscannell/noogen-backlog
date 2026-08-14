@@ -71,6 +71,48 @@ namespace Noogen.Backlog.Tests
             Assert.DoesNotContain("\\u", json, StringComparison.Ordinal);
         }
 
+        // --- search results ---
+
+        /// <summary>
+        /// Which source matched is part of the answer: a name hit is exact and current, a body hit
+        /// came from an index that lags and matches whole words.
+        /// </summary>
+        [Fact]
+        public void From_MatchHitBothSources_CarriesBothOnTheWire()
+        {
+            var match = new TicketMatch { Ticket = Sample(), InName = true, InBody = true };
+
+            using var document = JsonDocument.Parse(Serialize(TicketView.From(match)));
+
+            Assert.Equal(
+                ["name", "body"],
+                document.RootElement.GetProperty("match").EnumerateArray().Select(element => element.GetString()).ToList());
+        }
+
+        /// <summary>
+        /// A ticket does not have a match; a search result does. Every other verb must keep
+        /// emitting the shape it emitted before search existed.
+        /// </summary>
+        [Fact]
+        public void From_PlainTicket_HasNoMatchField()
+        {
+            using var document = JsonDocument.Parse(Serialize(TicketView.From(Sample())));
+
+            Assert.False(document.RootElement.TryGetProperty("match", out _));
+        }
+
+        [Fact]
+        public void Project_MatchIsNamed_IsSelectableLikeAnyOtherField()
+        {
+            var view = TicketView.From(new TicketMatch { Ticket = Sample(), InBody = true });
+
+            using var document = JsonDocument.Parse(Output.Project(view, Output.ParseFields("id,match")).ToJsonString());
+
+            Assert.Equal(
+                ["id", "match"],
+                document.RootElement.EnumerateObject().Select(property => property.Name).Order().ToList());
+        }
+
         // --- --fields ---
 
         [Fact]

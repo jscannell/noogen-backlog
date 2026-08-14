@@ -13,6 +13,13 @@ namespace Noogen.Backlog
         /// <summary>Work in flight, oldest first, so aging items surface at the top.</summary>
         Task<IReadOnlyList<Ticket>> WipAsync(TicketFilter filter, CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Tickets matching <paramref name="text"/>, across every tab. Two sources: a substring
+        /// match over the names the Sheet holds, and Drive's full-text index for the prose the
+        /// Sheet does not. See <c>BacklogStore.SearchAsync</c> for why it takes both.
+        /// </summary>
+        Task<IReadOnlyList<TicketMatch>> SearchAsync(string text, TicketFilter filter, CancellationToken cancellationToken = default);
+
         Task<FlowMetrics> FlowAsync(DateTimeOffset? since, CancellationToken cancellationToken = default);
 
         Task<Ticket?> GetAsync(string id, CancellationToken cancellationToken = default);

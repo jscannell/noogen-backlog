@@ -69,6 +69,125 @@ namespace Noogen.Backlog
             return filter.Top.HasValue ? tickets.Take(filter.Top.Value).ToList() : tickets;
         }
 
+        /// <summary>
+        /// Search, from two sources that answer different halves of the question.
+        ///
+        /// The Sheet holds the names — id, title, area, owner — so those are matched here, as
+        /// substrings, across all three tabs. That half is exact and immediate, which is what makes
+        /// it the half a duplicate check can rely on: Drive's index lags a write, and the ticket
+        /// somebody filed a minute ago is precisely the one they are about to file again.
+        ///
+        /// The Sheet holds no prose at all, so the description and acceptance criteria are only
+        /// reachable through Drive's full-text index. That half matches whole terms rather than
+        /// substrings, covers the entire document including the Activity Log, and may not yet know
+        /// about a document written moments ago.
+        ///
+        /// The two are joined on <c>Drive File ID</c>, which invariant 8 makes the Sheet's own
+        /// handle for the document. Joining there rather than on the file's name is what keeps the
+        /// answer authoritative: the returned rows are Sheet rows, so phase and rank are right, and
+        /// a Drive hit on anything that is not a ticket — the index spreadsheet, a document
+        /// somebody dropped in the folder — falls out of the join instead of being reported as one.
+        /// </summary>
+        public async Task<IReadOnlyList<TicketMatch>> SearchAsync(string text, TicketFilter filter, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                throw new ArgumentException("Searching needs some text to look for.", nameof(text));
+
+            var settings = await GetSettingsAsync(cancellationToken);
+            var tables = await _index.LoadAllAsync(cancellationToken);
+            var needle = text.Trim();
+
+            var tickets = tables.SelectMany(_index.ToTickets).Where(filter.Matches).ToList();
+            var matches = new Dictionary<string, TicketMatch>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ticket in tickets.Where(ticket => MatchesName(ticket, needle)))
+                matches[ticket.Id] = new TicketMatch { Ticket = ticket, InName = true };
+
+            foreach (var ticket in await MatchingBodiesAsync(settings, tickets, needle, cancellationToken))
+            {
+                if (matches.TryGetValue(ticket.Id, out var existing))
+                    existing.InBody = true;
+                else
+                    matches[ticket.Id] = new TicketMatch { Ticket = ticket, InBody = true };
+            }
+
+            var ordered = matches.Values
+                .OrderBy(match => match.InName ? 0 : 1)   // a name hit is the stronger signal
+                .ThenBy(match => match.Ticket.Score.Value.HasValue ? 0 : 1)
+                .ThenByDescending(match => match.Ticket.Score.Value ?? 0)
+                .ThenBy(match => match.Ticket.Id, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return filter.Top.HasValue ? ordered.Take(filter.Top.Value).ToList() : ordered;
+        }
+
+        /// <summary>
+        /// Substring, case-insensitive, over what the Sheet carries. Substring rather than whole
+        /// word on purpose: this is the half that has to find <c>NG-0070</c> from <c>0070</c> and
+        /// <c>sign-in</c> from <c>sign</c>, which is exactly what Drive's term index will not do.
+        /// </summary>
+        static bool MatchesName(Ticket ticket, string text) =>
+            Contains(ticket.Id, text)
+            || Contains(ticket.Title, text)
+            || Contains(ticket.Area, text)
+            || Contains(ticket.Owner, text);
+
+        static bool Contains(string? value, string text) =>
+            !string.IsNullOrEmpty(value) && value.Contains(text, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The Drive half. One query over the backlog's shared drive, joined back to the tickets
+        /// by document id — see <see cref="SearchAsync"/> for why the join is what makes it safe to
+        /// let the query itself be that broad.
+        /// </summary>
+        async Task<IReadOnlyList<Ticket>> MatchingBodiesAsync(
+            BacklogSettings settings,
+            IReadOnlyList<Ticket> tickets,
+            string text,
+            CancellationToken cancellationToken)
+        {
+            var byDocId = new Dictionary<string, Ticket>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ticket in tickets)
+            {
+                // A row with no document id cannot be reached from a Drive hit at all. doctor is
+                // what reports that; here it just means the ticket is unsearchable by body.
+                if (!string.IsNullOrEmpty(ticket.DocId))
+                    byDocId[ticket.DocId] = ticket;
+            }
+
+            if (byDocId.Count == 0)
+                return [];
+
+            var driveId = await DriveIdAsync(settings, cancellationToken);
+            var hits = await _drive.SearchTextAsync(text, DriveGateway.DocumentMimeType, driveId, cancellationToken);
+
+            return hits
+                .Select(hit => byDocId.TryGetValue(hit.Id, out var ticket) ? ticket : null)
+                .Where(ticket => ticket is not null)
+                .Select(ticket => ticket!)
+                .ToList();
+        }
+
+        string? _driveId;
+        bool _driveIdResolved;
+
+        /// <summary>
+        /// The shared drive the backlog lives on, asked once. A backlog rooted in My Drive has
+        /// none, and null is the honest answer rather than a failure — the join is what bounds the
+        /// results, so the enclosure is an optimisation and a courtesy, not the correctness story.
+        /// </summary>
+        async Task<string?> DriveIdAsync(BacklogSettings settings, CancellationToken cancellationToken)
+        {
+            if (_driveIdResolved || string.IsNullOrEmpty(settings.TicketsFolderId))
+                return _driveId;
+
+            _driveId = await _drive.GetDriveIdAsync(settings.TicketsFolderId, cancellationToken);
+            _driveIdResolved = true;
+
+            return _driveId;
+        }
+
         public async Task<FlowMetrics> FlowAsync(DateTimeOffset? since, CancellationToken cancellationToken = default)
         {
             await GetSettingsAsync(cancellationToken);

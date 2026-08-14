@@ -112,6 +112,8 @@ namespace Noogen.Backlog.Cli
                     return await commands.NextAsync(command);
                 case "wip":
                     return await commands.WipAsync(command);
+                case "find":
+                    return await commands.FindAsync(command);
                 case "flow":
                     return await commands.FlowAsync(command);
                 case "show":
@@ -206,12 +208,19 @@ namespace Noogen.Backlog.Cli
                 QUEUE
                   list [--area A] [--owner O] [--top N]   Unstarted work in rank order
                   next [--owner me]                       Highest-ranked item(s)
+                  find "<text>" [--top N]                 Search every tab, names and prose
                   show <id> [--section S] [--full]        One ticket, with its body
                   flow [--since 90d]                      Throughput and cycle-time p50/p85
 
                   show trims the Activity Log to the last few entries; --full prints all of
                   them, and --section description (or acceptance-criteria, notes, activity-log)
                   prints just that one — which is what you want before rewriting it.
+
+                  find is the check to run before filing something. It reads two sources and
+                  says which one hit: names — id, title, area, owner — come from the index and
+                  match on any fragment, while document prose comes from Drive's full-text
+                  index, which matches whole words only, covers the whole document including
+                  the Activity Log, and may not yet know about a document written minutes ago.
 
                 WORK IN FLIGHT
                   wip [--owner O]                         In Progress, oldest first, with aging
@@ -259,8 +268,8 @@ namespace Noogen.Backlog.Cli
                   reindex                                 Rebuild rows from their documents
 
                 Every command accepts --json for machine-readable output, which is always UTC.
-                On list, next and wip, --fields id,wsjf,title narrows it to the columns you
-                asked for. Human output uses the backlog's configured timezone; --utc shows UTC.
+                On list, next, wip and find, --fields id,wsjf,title narrows it to the columns
+                you asked for. Human output uses the backlog's configured timezone; --utc shows UTC.
                 WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20. The score flags are
                 also spelled out: --business-value, --time-criticality, --risk-opportunity,
                 --job-size.

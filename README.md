@@ -391,10 +391,11 @@ Overridable by `NOOGEN_BACKLOG_SPREADSHEET_ID`, `NOOGEN_BACKLOG_DRIVE_ID`, `NOOG
 backlog list [--area A] [--owner O] [--top N]   # the queue, rank order
 backlog next [--owner me]                       # highest-ranked item
 backlog wip [--owner O]                         # in flight, oldest first, flags aging
+backlog find "<text>" [--area A] [--top N]      # search every tab, names and prose
 backlog show <id> [--section S] [--full]        # one ticket and its body
 backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
-# list, next and wip take --fields to narrow the --json projection:
+# list, next, wip and find take --fields to narrow the --json projection:
 #   backlog list --top 10 --json --fields id,wsjf,title
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
@@ -425,13 +426,63 @@ backlog doctor | backlog reindex
 Every command accepts `--json`. That flag is the machine contract, and it is what makes the tool
 usable by agents: the skill teaches the CLI surface, not the storage layout.
 
+### Searching
+
+`find` is the one query verb that spans all three tabs, and the one that reads prose. It exists for
+the question asked before filing anything — *have we already got a ticket about this?* — which
+`list` answers badly and expensively, and which nothing answered at all for work in flight or
+already archived.
+
+It reads two sources, and says on every hit which one matched:
+
+```
+backlog find "rate limit"
+
+id       match      phase        wsjf  area      owner        title
+-------  ---------  -----------  ----  --------  -----------  ----------------------------
+NG-0031  name+body  archive      6     platform  j@noogen.ai  Retry a rate-limited request
+NG-0070  body       in-progress  3.33  platform  j@noogen.ai  Search the backlog
+```
+
+**Names** — id, title, area, owner — come from the Sheet, matched as **substrings**, case
+insensitively. That half is exact and immediate, which is what makes it the half a duplicate check
+can rely on.
+
+**Body** text comes from Drive's full-text index, because the Sheet holds no prose at all: the
+description and the acceptance criteria live only in the document. Three properties of that index
+are worth knowing before you trust a `find` that returned nothing:
+
+- It matches **whole terms, not substrings**. `find limit` will not match *limiting*, and `auth`
+  will not match *oauth*. The name half has no such restriction, which is why both exist.
+- It is **eventually consistent**. A document written in the last few minutes may not be indexed
+  yet, with no read-your-writes guarantee — which is exactly the moment a duplicate check runs. The
+  name half covers it, so a ticket filed a minute ago is still found by its title.
+- It indexes the **whole document**, Activity Log included. A ticket whose log says
+  `blocked — waiting on the rate limiter` matches a search for the rate limiter.
+
+The two halves are joined on `Drive File ID`, the handle the Sheet already keeps for each document.
+Joining there rather than on the file's name is what keeps the answer authoritative: every row
+returned is a Sheet row, so phase and rank are right, and a Drive hit on something that is not a
+ticket — the index spreadsheet, a document somebody dropped into the folder — falls out of the join
+instead of being reported as a result.
+
+The Drive query is confined to the backlog's own shared drive with `corpora=drive`, resolved once
+from the tickets folder. The tool holds full Drive scope by design (see **Authentication**), so an
+unconfined `fullText` query would sweep everything the signed-in person can read. A backlog rooted
+in My Drive has no shared drive to name; there the query is unconfined and the join is what bounds
+the result.
+
+Scoping by parent folder would have been the obvious alternative and is wrong: Drive's
+`'<id>' in parents` matches immediate children only, and archived documents sit two levels down
+under year and quarter, so a parent-scoped query would quietly answer for active tickets alone.
+
 ### Asking for less
 
 An agent pays for every byte it reads back, and the backlog's answers are large: a bare
 `list --json` over forty-odd tickets is around 17,000 characters, most of which the question did
 not need. Three options narrow it, and the skill teaches all three.
 
-`--fields` narrows the `--json` projection on `list`, `next` and `wip` to the columns named —
+`--fields` narrows the `--json` projection on `list`, `next`, `wip` and `find` to the columns named —
 `--fields id,wsjf,title` is a third the size of the whole thing. The names are the ones that appear
 on the wire, they are taken from the projection itself rather than a list kept alongside it, and an
 unrecognised one is a usage error listing the real ones. Asking for a field a particular ticket
@@ -472,8 +523,9 @@ begins with two dashes. The one thing an option will not take is another option 
 reads: `note NG-12 --text --json` is someone who forgot the text, not a note that says `--json`,
 so it errors. If a value really does start with two dashes, write it as `--text=--json`.
 
-The same goes for positional arguments. A verb takes a ticket id or nothing, and anything past
-that is refused — because the usual way an extra one appears is a value the shell tore in half.
+The same goes for positional arguments. A verb takes one — a ticket id, or `find`'s search text —
+or none, and anything past that is refused, because the usual way an extra one appears is a value
+the shell tore in half.
 Windows hands a native process one command-line string; PowerShell quotes an argument containing
 whitespace but does not escape a double quote already inside it, so
 `--description 'he said "no" and left'` ends the quoted run at `"no"` and the rest arrives as
