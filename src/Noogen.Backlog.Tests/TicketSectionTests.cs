@@ -211,5 +211,134 @@ namespace Noogen.Backlog.Tests
             Assert.Contains("Something a person wrote.", rewritten, StringComparison.Ordinal);
             Assert.StartsWith("## Acceptance Criteria\n\n- [ ] something measurable", rewritten, StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// The fault this rule exists to prevent, written the way it happened: a body whose first
+        /// line is a level-2 heading puts that heading immediately after `## Description`, so the
+        /// section a later write can reach is empty, the write inserts instead of replacing, and
+        /// the document ends up holding one description for every edit.
+        /// </summary>
+        [Fact]
+        public void ReplaceSection_TextHoldsASiblingLevelHeading_IsRefused()
+        {
+            var exception = Assert.Throws<ArgumentException>(
+                () => Replace(Body, "## Problem\n\nThe thing that is wrong."));
+
+            Assert.Contains("## Problem", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("### Problem", exception.Message, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Criteria are a flat checklist today, which is the only reason they were never damaged.
+        /// They go through the same function, so they get the same refusal.
+        /// </summary>
+        [Fact]
+        public void ReplaceSection_AcceptanceCriteriaTextHoldsASiblingLevelHeading_IsRefused()
+        {
+            Assert.Throws<ArgumentException>(
+                () => ReplaceCriteria(Body, "## Must have\n\n- [ ] something measurable"));
+        }
+
+        [Fact]
+        public void ReplaceSection_TextHoldsAShallowerHeading_IsRefused()
+        {
+            Assert.Throws<ArgumentException>(() => Replace(Body, "# Problem\n\nThe thing that is wrong."));
+        }
+
+        /// <summary>
+        /// The workaround the rule points at, and the shape every surviving description already
+        /// uses. A deeper heading is inside the section, so it replaces cleanly however often it
+        /// is written.
+        /// </summary>
+        [Fact]
+        public void ReplaceSection_TextHoldsADeeperHeading_ReplacesTheSection()
+        {
+            var text = "### Problem\n\nThe thing that is wrong.\n\n#### Detail\n\nMore.";
+
+            var rewritten = Replace(Body, text);
+
+            Assert.Contains("## Description\n\n" + text + "\n", rewritten, StringComparison.Ordinal);
+            Assert.DoesNotContain("The original description.", rewritten, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// The acceptance criterion the ticket asked for: the same body written three times leaves
+        /// the document identical after the second write and the third. Under the fault the third
+        /// write held three copies of the description.
+        /// </summary>
+        [Fact]
+        public void ReplaceSection_SameTextWrittenThreeTimes_IsUnchangedAfterTheSecondWrite()
+        {
+            var text = "### Problem\n\nThe thing that is wrong.";
+
+            var once = Replace(Body, text);
+            var twice = Replace(once, text);
+            var thrice = Replace(twice, text);
+
+            Assert.Equal(twice, thrice);
+            Assert.Equal(once, twice);
+        }
+
+        /// <summary>
+        /// Reading is the counterpart to writing and shares one definition of where a section
+        /// ends, so a description that opens with a subheading comes back whole rather than empty.
+        /// An empty section here is what made the fault read as "this ticket has no description".
+        /// </summary>
+        [Fact]
+        public void SectionOf_DescriptionOpensWithASubheading_ReturnsTheWholeSection()
+        {
+            var rewritten = Replace(Body, "### Problem\n\nThe thing that is wrong.");
+
+            var section = TicketDocument.SectionOf(rewritten, TicketDocument.DescriptionHeading);
+
+            Assert.NotNull(section);
+            Assert.Contains("### Problem", section, StringComparison.Ordinal);
+            Assert.Contains("The thing that is wrong.", section, StringComparison.Ordinal);
+            Assert.DoesNotContain("## Acceptance Criteria", section, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void RequireSectionBody_TextHoldsNoHeading_IsAccepted()
+        {
+            TicketDocument.RequireSectionBody("Just prose, and a # that is not a heading.", TicketDocument.DescriptionHeading);
+        }
+
+        /// <summary>
+        /// A document damaged before the rule shipped: two Description sections, the stale one out
+        /// of reach of every write. The index is correct throughout, so this is the only thing
+        /// that can report it.
+        /// </summary>
+        [Fact]
+        public void RepeatedSections_BodyHoldsTwoDescriptions_ReportsTheHeadingAndTheCount()
+        {
+            var damaged =
+                "## Description\n\nThe current text.\n\n" +
+                "## Description\n\nThe stale text.\n\n" +
+                "## Activity Log\n\n- 2026-08-07 09:00 — created\n";
+
+            var repeated = TicketDocument.RepeatedSections(damaged);
+
+            Assert.Equal(2, repeated[TicketDocument.DescriptionHeading]);
+        }
+
+        [Fact]
+        public void RepeatedSections_EverySectionAppearsOnce_ReportsNothing()
+        {
+            Assert.Empty(TicketDocument.RepeatedSections(Body));
+        }
+
+        /// <summary>
+        /// Subheadings repeat legitimately — two sections may each have a `### Problem` — so only
+        /// the level the document's sections are written at is counted.
+        /// </summary>
+        [Fact]
+        public void RepeatedSections_SubheadingRepeatsUnderDifferentSections_ReportsNothing()
+        {
+            var body =
+                "## Description\n\n### Problem\n\nOne.\n\n" +
+                "## Notes\n\n### Problem\n\nAnother.\n";
+
+            Assert.Empty(TicketDocument.RepeatedSections(body));
+        }
     }
 }

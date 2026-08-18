@@ -148,6 +148,27 @@ These are the things to be careful about; most of the design follows from them.
      nothing to it. What `--note` removes is the second round trip against a document that was
      just written.
 
+     **A section body's own headings must be deeper than the heading that bounds it.** The
+     section ends at the next heading of the same level or higher, so a `##` in a description is
+     a sibling of `## Description`, not part of it. Accepting one was silent damage: the first
+     write looked right, but the section boundary then fell at the body's first heading, so the
+     region the *next* write could reach was empty — it inserted instead of replacing and stranded
+     the previous body below, out of reach of every write after that, one copy per edit.
+     `RequireSectionBody` refuses it from `ReplaceSection` and `BuildInitialBody` alike, before
+     anything is written, and names the `###` spelling to use instead.
+
+     The refusal is the whole fix, and the alternative is the trap. Bounding a section by the
+     *known* headings instead would let a body hold any heading — and would pull a `## Design` a
+     person added between Description and Acceptance Criteria inside the region, where the next
+     write deletes it. That is this invariant's promise inverted, so the ambiguity is refused
+     rather than resolved: the CLI cannot tell the two apart, because on the page they are the
+     same thing.
+
+     `doctor` reads for what the fault left behind — a `##` heading a document holds more than
+     once (`RepeatedSections`, kind `duplicate-section`). Drift compares the Sheet against the
+     metadata and cannot see the body at all, which is why this class of damage was invisible
+     twice over. The stale copies are only removable in Docs.
+
    Reading is the counterpart, and it is bounded by the same rule. `SectionOf` walks the section
    boundaries through the *same* `FindSection` as `ReplaceSection`, so a reader and a writer can
    never disagree about which lines belong to a human — that is why the walk is one private method

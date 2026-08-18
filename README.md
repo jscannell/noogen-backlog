@@ -567,6 +567,15 @@ Because a replacement needs the current text, `show --section description` reads
 a replacement would overwrite — the same boundary walk answers both, so the two cannot disagree
 about where a section ends.
 
+That boundary is also a rule the text has to keep: **a section body's headings start at `###`.** A
+`##` is a sibling of `## Description` rather than part of it, so a body that opens with one falls
+outside the section it was written into. The write is refused, before anything is written, with a
+message naming the heading and the deeper spelling to use. Accepting it used to be silent damage —
+the first write looked right, and every write after it inserted a fresh copy above a stale one it
+could no longer reach, one per edit, with the index correct throughout. `backlog doctor` now reads
+the body for the shape that leaves behind: a `##` heading a document holds more than once, reported
+as `duplicate-section`. Stale copies can only be deleted in Docs.
+
 An edit still does not log itself: a log entry saying "description edited" would say nothing Docs'
 revision history does not already hold. When the change *is* worth recording, `edit --note "..."`
 carries the line in the same write, rather than costing a second command and a second round trip

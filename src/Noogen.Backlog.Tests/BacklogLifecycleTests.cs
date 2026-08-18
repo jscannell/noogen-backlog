@@ -339,6 +339,40 @@ namespace Noogen.Backlog.Tests
             Assert.Contains(report.Issues, issue => issue.Kind == "duplicate" && issue.Id == ticket.Id);
         }
 
+        /// <summary>
+        /// The damage a body-level fault leaves behind. The index is untouched, so every other
+        /// check in the sweep reports a healthy ticket over a document holding two descriptions
+        /// with nothing to say which is current — that gap is why the sweep now reads the body.
+        /// </summary>
+        [Fact]
+        public async Task DoctorAsync_DocumentHoldsTwoDescriptions_ReportsTheDuplicateSection()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            var ticket = await backlog.AddAsync("Something");
+
+            var document = TicketDocument.Parse(backlog.Drive.ContentOf(ticket.DocId!));
+            document.Body = "## Description\n\nThe current text.\n\n" + document.Body;
+            await backlog.Drive.UpdateDocAsync(ticket.DocId!, document.Serialize());
+
+            var report = await backlog.Store.DoctorAsync();
+
+            Assert.False(report.IsHealthy);
+            Assert.Contains(
+                report.Issues,
+                issue => issue.Kind == "duplicate-section" && issue.Id == ticket.Id && issue.Detail.Contains("Description"));
+        }
+
+        [Fact]
+        public async Task DoctorAsync_EverySectionAppearsOnce_ReportsNoDuplicateSection()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            await backlog.AddAsync("Something");
+
+            var report = await backlog.Store.DoctorAsync();
+
+            Assert.DoesNotContain(report.Issues, issue => issue.Kind == "duplicate-section");
+        }
+
         [Fact]
         public async Task StartAsync_MovingARowAcrossTabs_AppendsBeforeItDeletes()
         {

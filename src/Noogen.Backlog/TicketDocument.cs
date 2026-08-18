@@ -381,6 +381,12 @@ namespace Noogen.Backlog
         /// </summary>
         public static string BuildInitialBody(Ticket ticket, string? description, string? acceptanceCriteria, TimeZoneInfo? zone = null)
         {
+            // The same rule as an edit, and refused here for the same reason: the first write of
+            // such a body looks right, and it is the *second* one that duplicates the section. A
+            // ticket filed with one would read correctly until someone tried to correct it.
+            RequireSectionBody(description ?? string.Empty, DescriptionHeading);
+            RequireSectionBody(acceptanceCriteria ?? string.Empty, AcceptanceCriteriaHeading);
+
             var builder = new StringBuilder();
 
             builder.Append("## Description\n\n");
@@ -410,6 +416,59 @@ namespace Noogen.Backlog
         /// rather than bare prose, so the section starts in the shape it is meant to end up in.
         /// </summary>
         public const string UnwrittenCriteria = "- [ ] *TODO*";
+
+        /// <summary>
+        /// The level every section this class writes is written at, and the level to validate a
+        /// body against when the document does not have the section yet.
+        /// </summary>
+        public const int SectionLevel = 2;
+
+        /// <summary>
+        /// Refuses a section body that would break out of the section it is written into.
+        ///
+        /// A section ends at the next heading of its own level or higher (see
+        /// <see cref="FindSection"/>), so a body whose own headings are that shallow does not stay
+        /// inside it. The first write looks correct — the text is all there, under the right
+        /// heading — but the section boundary now falls at the body's first heading, so the region
+        /// a later <see cref="ReplaceSection"/> can reach is empty. The next write has nothing to
+        /// remove and inserts instead, leaving the previous body below it, out of reach of every
+        /// write after that. The copies accumulate, one for each edit, and the index stays correct
+        /// throughout so nothing reports a fault.
+        ///
+        /// The CLI cannot tell such a heading apart from a sibling section a human added — both
+        /// are a `##` in the same place — so it refuses rather than guesses. Bounding the section
+        /// by the *known* headings instead would resolve the ambiguity the other way and delete
+        /// the human's section, which is the direction invariant 9 exists to prevent.
+        ///
+        /// The cost is small and the workaround is the natural one: headings inside a section
+        /// start at <c>###</c>, which is what they mean anyway — a subheading of the section they
+        /// are in. Docs renders them the same way.
+        /// </summary>
+        /// <exception cref="ArgumentException">
+        /// The text holds a heading at <paramref name="level"/> or higher.
+        /// </exception>
+        public static void RequireSectionBody(string text, string heading, int level = SectionLevel)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(heading);
+
+            foreach (var line in (text ?? string.Empty).Replace("\r\n", "\n").Split('\n'))
+            {
+                var found = HeadingLevel(line);
+
+                if (found == 0 || found > level)
+                    continue;
+
+                var bounds = new string('#', level);
+                var deeper = new string('#', level + 1);
+
+                throw new ArgumentException(
+                    $"The {heading} section cannot hold the heading '{line.Trim()}'. A section ends at the next " +
+                    $"heading of its own level or higher, so a '{new string('#', found)}' heading falls outside " +
+                    $"'{bounds} {heading}' rather than inside it — a later write could not replace it, and the " +
+                    $"document would end up holding one copy of the section for every edit. Write it as " +
+                    $"'{deeper} {HeadingText(line, found)}' or deeper.");
+            }
+        }
 
         /// <summary>
         /// Replaces the text under one heading, and touches nothing else in the body.
@@ -444,6 +503,10 @@ namespace Noogen.Backlog
             var replacement = (text ?? string.Empty).Replace("\r\n", "\n").Trim('\n');
 
             FindSection(lines, heading, out var start, out var end);
+
+            // Against the level the section actually has, which is the level the replacement has
+            // to stay below. A missing heading is inserted at SectionLevel just below.
+            RequireSectionBody(replacement, heading, start < 0 ? SectionLevel : HeadingLevel(lines[start]));
 
             var rebuilt = new List<string>();
 
@@ -557,6 +620,45 @@ namespace Noogen.Backlog
             }
 
             return headings;
+        }
+
+        /// <summary>
+        /// Section headings the body holds more than once, mapped to how many copies there are.
+        ///
+        /// A document has one Description and one Acceptance Criteria, so a second copy of either
+        /// is damage: the stale one is out of reach of <see cref="ReplaceSection"/> — that is the
+        /// shape the fault left behind — and a reader has no way to tell which copy is current.
+        /// The same is true of a section a person added, so this counts every heading at
+        /// <see cref="SectionLevel"/> rather than only the ones we know about.
+        ///
+        /// This is what makes the fault class visible. <c>doctor</c> compares the Sheet against the
+        /// document's metadata, and both this fault and the truncation before it damaged the body
+        /// while leaving the metadata correct, so the sweep reported healthy twice over a document
+        /// that was not. A repeated section is a fact about the body alone, which is why it is
+        /// read here and not derived from the index.
+        /// </summary>
+        public static IReadOnlyDictionary<string, int> RepeatedSections(string body)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var line in (body ?? string.Empty).Replace("\r\n", "\n").Split('\n'))
+            {
+                if (HeadingLevel(line) != SectionLevel)
+                    continue;
+
+                var text = HeadingText(line, SectionLevel);
+                counts[text] = counts.TryGetValue(text, out var seen) ? seen + 1 : 1;
+            }
+
+            var repeated = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in counts)
+            {
+                if (entry.Value > 1)
+                    repeated[entry.Key] = entry.Value;
+            }
+
+            return repeated;
         }
 
         /// <summary>The headings <see cref="SectionOf"/> is asked for by name most often.</summary>

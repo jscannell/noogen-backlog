@@ -275,5 +275,58 @@ namespace Noogen.Backlog.Tests
             Assert.Contains("entry number 6", trimmed, StringComparison.Ordinal);
             Assert.Contains("entry number 6", await backlog.Store.GetBodyAsync(ticket.Id), StringComparison.Ordinal);
         }
+
+        /// <summary>
+        /// `new` refuses the same body an `edit` would. The first write of one is harmless — it is
+        /// the second that duplicates — so filing a ticket with it would only look correct until
+        /// somebody tried to correct it, which is the worst moment to find out.
+        /// </summary>
+        [Fact]
+        public async Task CreateAsync_DescriptionHoldsASiblingLevelHeading_IsRefusedAndFilesNothing()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+
+            await Assert.ThrowsAsync<ArgumentException>(
+                () => AddAsync(backlog, "## Problem\n\nThe thing that is wrong."));
+
+            Assert.Equal(0, backlog.RowCount(BacklogPhase.Backlog));
+        }
+
+        [Fact]
+        public async Task UpdateAsync_DescriptionHoldsASiblingLevelHeading_IsRefusedAndLeavesTheDocumentAlone()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            var ticket = await AddAsync(backlog, "### Problem\n\nThe original.");
+            var before = await backlog.Store.GetBodyAsync(ticket.Id);
+
+            await Assert.ThrowsAsync<ArgumentException>(
+                () => backlog.Store.UpdateAsync(ticket.Id, new TicketEdit { Description = "## Problem\n\nRewritten." }));
+
+            Assert.Equal(before, await backlog.Store.GetBodyAsync(ticket.Id));
+        }
+
+        /// <summary>
+        /// The fault, end to end and through the store: the same description written three times
+        /// leaves one copy. Under the fault the document held three, each out of reach of the next
+        /// write, and every command exited 0.
+        /// </summary>
+        [Fact]
+        public async Task UpdateAsync_DescriptionWithSubheadingsWrittenThreeTimes_LeavesOneCopy()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            var ticket = await AddAsync(backlog, "### Problem\n\nThe original.");
+
+            var text = "### Problem\n\nThe thing that is wrong.\n\n### Approach\n\nWhat to do about it.";
+
+            await backlog.Store.UpdateAsync(ticket.Id, new TicketEdit { Description = text });
+            var second = await backlog.Store.GetBodyAsync(ticket.Id);
+
+            await backlog.Store.UpdateAsync(ticket.Id, new TicketEdit { Description = text });
+            var third = await backlog.Store.GetBodyAsync(ticket.Id);
+
+            Assert.Equal(second, third);
+            Assert.Empty(TicketDocument.RepeatedSections(third));
+            Assert.Equal("## Description\n\n" + text, TicketDocument.SectionOf(third, TicketDocument.DescriptionHeading)?.TrimEnd('\n'));
+        }
     }
 }

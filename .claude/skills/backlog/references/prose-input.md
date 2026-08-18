@@ -46,6 +46,43 @@ of it.
 - **An option a verb does not read is a usage error**, so a flag borrowed from another verb fails
   loudly rather than being ignored.
 
+## What a section body may hold, and where a section ends
+
+A section runs from its `## ` heading to the **next heading of the same level or higher**. That is
+one rule, and both the reader (`show --section`) and the writer (`--description`) use it, so what
+you read back is exactly what a replacement overwrites.
+
+The consequence: **headings inside a description or a set of acceptance criteria must start at
+`###`.** A `##` heading is a sibling of `## Description`, not a part of it, so a body that opens
+with one falls outside the section it was written into.
+
+```
+## Problem          <- refused: a sibling of `## Description`, not part of it
+### Problem         <- fine, and what you meant anyway
+```
+
+This is refused rather than accepted, because accepting it was silent damage. The *first* write of
+such a body looked right — the text was all there, under the right heading. But the section
+boundary now fell at the body's own first heading, so the region the next write could reach was
+empty: it had nothing to remove, inserted instead, and left the previous body stranded below,
+out of reach of every write after that. The copies accumulated, one per edit, and nothing reported
+it — `doctor` compares the Sheet against the document's metadata, and the metadata stayed correct
+throughout. `show --section description` came back empty, which read as "this ticket has no
+description".
+
+The CLI cannot tell such a heading apart from a section a person added, because they are the same
+thing on the page. Bounding the section by the headings we know instead would resolve that the
+other way and delete the person's section, which is worse.
+
+Two smaller notes:
+
+- The refusal is exit 1, kind `invalid-argument`, and the message names the heading and the `###`
+  spelling to use instead. It happens before anything is written, so a refused `new` files no
+  ticket and a refused `edit` leaves the document untouched.
+- `backlog doctor` reports a document that holds the same `## ` heading more than once, kind
+  `duplicate-section`. That is the shape the old fault left behind, and the stale copies can only
+  be removed in Docs.
+
 ## Encoding
 
 Files and pipes are decoded as UTF-8 after a byte-order mark, falling back to the console encoding

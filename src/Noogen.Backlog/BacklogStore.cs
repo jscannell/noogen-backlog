@@ -568,6 +568,18 @@ namespace Noogen.Backlog
 
                     foreach (var drift in DescribeDrift(ticket, document.Ticket))
                         report.Add(ticket.Id, "drift", drift);
+
+                    // Drift is a Sheet-against-metadata check, and it cannot see the body at all.
+                    // A repeated section is damage that leaves the metadata correct, so without
+                    // this the sweep reports a healthy ticket over a document holding four
+                    // descriptions and no way to tell which one is current.
+                    foreach (var repeated in TicketDocument.RepeatedSections(document.Body))
+                    {
+                        report.Add(
+                            ticket.Id,
+                            "duplicate-section",
+                            $"Document holds {repeated.Value} '## {repeated.Key}' sections. Only the first is reachable by a write, so the rest are stale — open the document and delete them.");
+                    }
                 }
             }
 

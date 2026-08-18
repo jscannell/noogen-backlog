@@ -171,6 +171,11 @@ and a file path cannot be split whatever it contains. The CLI refuses a split va
 rather than filing a truncated ticket — if you see that, switch to a file. `references/prose-input.md`
 has the full rules (empty input, values beginning with two dashes, one stdin reader per command).
 
+**Headings inside a section start at `###`.** A section ends at the next heading of its own level
+or higher, so a `##` in a description or a set of criteria is a sibling of `## Description` rather
+than part of it. The CLI refuses one and names the heading; write `### Problem`, not `## Problem`.
+Deeper levels nest as you would expect, and Docs renders them the same way.
+
 ## Rules
 
 1. **Archive, never delete.** Nothing is ever trashed. If asked to delete a ticket, archive it as
