@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Company-wide work-item tracker. One Google Doc per ticket in a Drive shared drive, written and read
-as markdown, indexed by a Google Sheet, prioritised with WSJF, run as Kanban. Read `README.md`
+as markdown, indexed by a Google Sheet, prioritized with WSJF, run as Kanban. Read `README.md`
 first — it covers the model, setup, and command surface.
 
 **To use the backlog** (rather than work on it), invoke the `backlog` skill in
@@ -25,7 +25,7 @@ Solution: `src/Noogen.Backlog.slnx`.
 - **`Noogen.Backlog.Tests`** — xUnit over the fakes.
 - **`Noogen.Providers.GoogleWorkspace.Tests`** — xUnit over a stub HTTP transport. The gateways are
   translators from our vocabulary into Google's REST shapes, so what they put on the wire *is* the
-  behaviour; `StubHttpClientFactory` swaps the handler and leaves the rest of Google's pipeline
+  behavior; `StubHttpClientFactory` swaps the handler and leaves the rest of Google's pipeline
   intact. Auth, token protection and the OAuth client live here too — everything except the
   build-time embedding, which can only be asserted against the CLI assembly that carries it.
 
@@ -34,13 +34,13 @@ Solution: `src/Noogen.Backlog.slnx`.
 These are the things to be careful about; most of the design follows from them.
 
 1. **The tab is the state.** `BacklogPhase` carries `TabName`, `IsRanked`, `UsesLiveFormulas`, and
-   the transition table. Derive behaviour from the phase — never re-test a status string at a
+   the transition table. Derive behavior from the phase — never re-test a status string at a
    call site, and never add a status column to the Backlog tab.
 
 2. **Append before delete.** A transition is a cross-tab row move: two non-atomic API calls.
    `TicketMover` appends to the destination *then* deletes from the source, so an interruption
    duplicates a ticket rather than losing one. `doctor` detects the duplicate. Never reverse this,
-   and never "optimise" it into a delete-first.
+   and never "optimize" it into a delete-first.
 
 3. **The Sheet owns `Cost of Delay`, `WSJF`, `Rank`.** On the Backlog tab those are live formulas
    and the store must not write values into them. On In Progress and Archive they are frozen static
@@ -60,13 +60,13 @@ These are the things to be careful about; most of the design follows from them.
    The consequence to respect: anything that decides *what to write into a cell* must walk
    `SheetTable.CanonicalHeaders`, not `Headers`. `BuildCell` switches on the schema's names, so
    walking the literal header row of a legacy tab would match nothing and blank the row.
-   `Canonical` matches whole normalised strings only — a prefix match would confuse `id` with
+   `Canonical` matches whole normalized strings only — a prefix match would confuse `id` with
    `doc_id`, which are unrelated (see invariant 8).
 
 5. **Timestamps are real Sheets datetime serials, not text.** A serial is a fractional day
    interpreted against the *spreadsheet's own timezone*, which buys native local rendering,
    correct sorting across DST, and working date filters. Four consequences to respect:
-   - `SheetTime.ToSerial`/`FromSerial` **quantise to whole seconds**. A double cannot hold most
+   - `SheetTime.ToSerial`/`FromSerial` **quantize to whole seconds**. A double cannot hold most
      instants exactly, and without it 23:59:00 reads back as 23:58:59.9999998.
    - A serial only *looks* like a time once the cell carries a `DATE_TIME` number format, and a
      format lives on cells, not on columns. `values.append` with `INSERT_ROWS` **inserts** a new
@@ -98,7 +98,7 @@ These are the things to be careful about; most of the design follows from them.
    would leave the Sheet as their only copy, which is the one thing the repair path exists to
    survive.
 
-   Metadata keys are the same names as the columns, canonicalised on the way in, so a person may
+   Metadata keys are the same names as the columns, canonicalized on the way in, so a person may
    write `job size` or `bv` by hand. `ID` is the ticket id; `Drive File ID` is Drive's file id for
    the document and is *not* in the document — Drive has no paths, so it is the only handle the
    store has for reading and moving that file, and it lives in the Sheet where the store can find
@@ -181,8 +181,8 @@ These are the things to be careful about; most of the design follows from them.
    unrecoverable failure this invariant exists to prevent. It is called from the `show` command and
    nowhere else, and adding a second caller means proving that caller never writes.
 
-   Everything else about the body stays hands-off. In particular this is not licence to
-   "normalise" prose — see invariant 18. Blanking either section is refused rather than treated as
+   Everything else about the body stays hands-off. In particular this is not license to
+   "normalize" prose — see invariant 18. Blanking either section is refused rather than treated as
    a clear: every editable *field* is a scalar the Sheet also holds, so emptying one loses
    nothing, while emptying a section throws away writing. Docs' own revision history is what
    recovers an overwrite, which is also why neither edit writes an Activity Log entry.
@@ -195,7 +195,7 @@ These are the things to be careful about; most of the design follows from them.
 12. **Document parse failures are `FormatException`.** `doctor` catches that to report a bad file
     and continue; anything else aborts the sweep.
 
-13. **`--json` is always UTC.** Human output localises; the machine contract does not. The skill
+13. **`--json` is always UTC.** Human output localizes; the machine contract does not. The skill
     and the future agent toolset parse that output, so a representation that moves with a config
     setting would be a trap.
 
@@ -221,7 +221,7 @@ These are the things to be careful about; most of the design follows from them.
 
     Two consequences. MSBuild's `%(RecursiveDir)` emits the *build machine's* separator, so a
     resource is really named `skill/references\wsjf.md` on Windows — `EmbeddedSkill` splits on
-    both and normalises to forward slashes. And the install target is named from the skill's own
+    both and normalizes to forward slashes. And the install target is named from the skill's own
     frontmatter `name:`, not a constant, because Claude Code discovers a skill by its directory
     and a rename that updated only one would install a stale second copy beside the first.
 
@@ -250,14 +250,14 @@ These are the things to be careful about; most of the design follows from them.
 
     The cost, and the thing to respect: the round trip is not byte-exact. Docs stores paragraphs
     and lists, so an export comes back in Docs' style — hard-wrapped lines rejoined into one
-    paragraph, `_italic_` renormalised to `*italic*`, backslash-escaped punctuation (`\-`, `\--`),
+    paragraph, `_italic_` renormalized to `*italic*`, backslash-escaped punctuation (`\-`, `\--`),
     two trailing spaces on every list item but the last. Anything we *generate* should already be
     in that style so a new document survives its first save unchanged, which is why
     `BuildInitialBody` writes `*TODO*` and not `_TODO_`. All of it is stable rather than
     compounding: verified live across three consecutive writes, where the body was byte-identical
     apart from the appended log entry. The metadata parser must keep tolerating those shapes
     (`TicketDocumentTests` pins them), and the body must keep being copied through exactly as it
-    came back. Never "normalise" the prose to undo Docs' escaping: that is rewriting a human's
+    came back. Never "normalize" the prose to undo Docs' escaping: that is rewriting a human's
     text, which invariant 9 exists to prevent.
 
     Two things are *not* cosmetic, and both are the same shape: Docs rewrote a value we have to
@@ -283,7 +283,7 @@ These are the things to be careful about; most of the design follows from them.
 
 19. **A rate-limit response is a rejection, so it is retried; nothing else is.**
     `RateLimitRetryHandler` sits on both services and retries 429 — and Drive's older 403 spelling
-    of the same thing — with equal-jitter backoff, honouring `Retry-After` where Google sends one.
+    of the same thing — with equal-jitter backoff, honoring `Retry-After` where Google sends one.
 
     Retrying is safe *because* of what a 429 is: Google refused the request, it was never
     half-applied, so a retried append cannot duplicate a row. That is exactly what invariant 2
@@ -352,10 +352,16 @@ These are the things to be careful about; most of the design follows from them.
 - Always write tests, named `MethodUnderTest_Scenario_ExpectedBehavior`. Update READMEs and the
   skill when the command surface changes.
 - [Conventional Commits](https://www.conventionalcommits.org/) (`feat(backlog): ...`).
+- **US English everywhere prose is written** — docs, comments, commit messages, CLI output, and the
+  tickets the skill teaches an agent to file: `behavior`, `organization`, `normalize`, `license`.
+  The exception is anything the system owns. `Outcome.Cancelled` spells the wire value `cancelled`,
+  which is what `archive --as`, the Sheet's Status column and `--json` all carry, so respelling the
+  identifier would rewrite live data and break every archived row. An identifier, a flag or a status
+  is quoted as it is spelled; only prose is converted.
 
 ## Testing
 
-`TestBacklog.CreateAsync()` builds an initialised backlog over `FakeSheetsGateway` /
+`TestBacklog.CreateAsync()` builds an initialized backlog over `FakeSheetsGateway` /
 `FakeDriveGateway`. The fakes store raw cell content, so tests can assert formula-vs-frozen-value
 directly. `FakeSheetsGateway.FailNextDeleteRow` injects the fault that proves invariant 2.
 `TestClock` drives lead/cycle time without real waiting. `TestBacklog.UseLegacyHeadersAsync()`

@@ -193,7 +193,7 @@ namespace Noogen.Providers.GoogleWorkspace
         public OAuthClientNotConfiguredException(string oauthFilePath)
             : base(
                 "No OAuth client is configured, so 'backlog login' cannot start.\n\n" +
-                "Someone needs to create one, once, for the whole organisation:\n" +
+                "Someone needs to create one, once, for the whole organization:\n" +
                 "  1. Google Cloud console -> APIs & Services -> Credentials\n" +
                 "  2. Create Credentials -> OAuth client ID -> Application type: Desktop app\n" +
                 "  3. On the OAuth consent screen choose User Type: Internal\n" +

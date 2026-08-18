@@ -199,7 +199,7 @@ namespace Noogen.Backlog.Cli
         static void WriteHelp()
         {
             Output.WriteLine("""
-                backlog — a WSJF-prioritised Kanban backlog stored in Google Drive.
+                backlog — a WSJF-prioritized Kanban backlog stored in Google Drive.
 
                 Work moves Backlog -> In Progress -> Archive. The tab a ticket lives on is its
                 state, so the verbs below are the transitions; there is no free-form status flag.

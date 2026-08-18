@@ -11,7 +11,7 @@
     <ToolCommandName>backlog</ToolCommandName>
     <PackageId>Noogen.Backlog.Cli</PackageId>
     <PackageOutputPath>$(MSBuildThisFileDirectory)..\..\artifacts</PackageOutputPath>
-    <Description>Noogen backlog — a WSJF-prioritised Kanban work-item tracker stored in Google Drive.</Description>
+    <Description>Noogen backlog — a WSJF-prioritized Kanban work-item tracker stored in Google Drive.</Description>
   </PropertyGroup>
 
   <!--

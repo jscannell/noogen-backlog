@@ -35,6 +35,7 @@ namespace Noogen.Backlog.Tests
             Assert.True(EmbeddedSkill.IsEmbedded);
             Assert.Contains(EmbeddedSkill.Files, file => file.RelativePath == EmbeddedSkill.EntryFileName);
             Assert.Contains(EmbeddedSkill.Files, file => file.RelativePath == "references/wsjf.md");
+            Assert.Contains(EmbeddedSkill.Files, file => file.RelativePath == "references/writing-style.md");
         }
 
         [Fact]

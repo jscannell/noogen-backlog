@@ -3,6 +3,9 @@
 Read this when `backlog new` or `backlog edit` refused something you passed, or when you are about
 to pass a description or a set of acceptance criteria and want the rules rather than the summary.
 
+This file is the mechanics. `writing-style.md` is what to write — the voice, the shape of each
+field, and the rule that you never restyle prose somebody else wrote.
+
 ## The short version
 
 | you have | use |

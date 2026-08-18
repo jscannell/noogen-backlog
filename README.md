@@ -1,7 +1,7 @@
 # Noogen backlog
 
 A lightweight, company-wide work-item tracker: **one Google Doc per ticket in a Drive shared drive,
-indexed by a Google Sheet, prioritised with WSJF, run as Kanban.** Readable and editable by humans
+indexed by a Google Sheet, prioritized with WSJF, run as Kanban.** Readable and editable by humans
 in Docs; queryable and writable by agents through the `backlog` CLI.
 
 Completed work is **archived, never deleted**.
@@ -37,7 +37,7 @@ abbreviations. `WSJF` keeps its name — it is the term of art.
 | `ID` | the ticket id, e.g. `NG-0007` |
 | `Title` | links to the ticket document |
 | `Type`, `Area`, `Owner` | classification |
-| `Business Value` | what the organisation or its users gain |
+| `Business Value` | what the organization or its users gain |
 | `Time Criticality` | how fast the value decays |
 | `Risk & Opportunity` | risk reduction and opportunity enablement |
 | `Job Size` | effort, the denominator |
@@ -128,7 +128,7 @@ check could see it: `doctor` compares the Sheet against the metadata, and those 
 
 Everything below the bullets is yours. The CLI regenerates the heading and the bullet block on
 every write and copies the rest through untouched — including a sentence typed straight under the
-title, which is body, not a field. An unrecognised bullet round-trips rather than being eaten, so
+title, which is body, not a field. An unrecognized bullet round-trips rather than being eaten, so
 `- **epic:** platform-rebrand` survives.
 
 Editing a document by hand is expected; `backlog reindex` folds those edits back into the Sheet.
@@ -148,7 +148,7 @@ it is the machine contract, and a representation that moved with a config settin
 
 Two honest caveats. A datetime serial is a wall-clock value, so the repeated hour at DST fall-back
 is ambiguous on read-back; it resolves to the earlier instant, bounded at one hour, once a year,
-on metrics reported in days. And serials are quantised to whole seconds, since a fractional day in
+on metrics reported in days. And serials are quantized to whole seconds, since a fractional day in
 a double cannot represent most instants exactly.
 
 ## Install
@@ -253,17 +253,17 @@ That breadth is the reason token protection matters, and worth weighing before r
 
 **What it is.** The credential that identifies *this CLI* to Google — not any person, and not any
 grant of access. It tells Google's consent screen which application is asking. Everyone in the
-organisation uses the same one; individual identity comes from `backlog login`.
+organization uses the same one; individual identity comes from `backlog login`.
 
 **Which console?** You create it in **Google Cloud** (`console.cloud.google.com`), not in Workspace
 admin. Workspace matters in exactly two ways, both covered below: it is what makes the *Internal*
 option available, and it is where an admin can allowlist or revoke the app afterwards.
 
 This is **not** domain-wide delegation. The Gmail integration in the platform repo uses DWD, set up
-in `admin.google.com`, where a service account is authorised to impersonate users. Nothing like
+in `admin.google.com`, where a service account is authorized to impersonate users. Nothing like
 that is needed here, and there is no reason to visit that page for this.
 
-**Prerequisite: the Cloud project must belong to your Workspace organisation.** Open the project
+**Prerequisite: the Cloud project must belong to your Workspace organization.** Open the project
 picker in the Cloud console and check the **Organization** column shows your domain rather than
 "No organization". If the project was created under a personal account, the *Internal* user type
 is simply not offered, and you would be pushed toward External and Google's verification review.
@@ -335,7 +335,7 @@ Building **without** the file is fully supported: the tool falls back to
 `NOOGEN_BACKLOG_OAUTH_CLIENT_SECRET`. That is what a contributor who does not have the secret
 gets, and the whole test suite passes in that state.
 
-Resolution order is environment → local file → embedded. The embedded copy is the organisation
+Resolution order is environment → local file → embedded. The embedded copy is the organization
 default, and it comes last so anyone testing against a different client can override it without
 rebuilding.
 
@@ -357,12 +357,12 @@ file can present a consent screen that says "Noogen backlog" — they cannot rea
 Treat it as low-sensitivity configuration, not as a credential.
 
 **When something is wrong**, `backlog login` names the specific problem rather than repeating the
-setup guide — wrong client type, malformed JSON, missing `client_secret`, or unrecognised shape.
+setup guide — wrong client type, malformed JSON, missing `client_secret`, or unrecognized shape.
 
 ## One-time Google setup
 
 1. Enable the **Drive API** and **Sheets API** on the GCP project.
-2. Create the OAuth client described above — once, for the whole organisation.
+2. Create the OAuth client described above — once, for the whole organization.
 3. Make sure everyone who needs the backlog is a member of the shared drive. That, not any grant
    inside this tool, is what controls access.
 4. Each person runs `backlog login`.
@@ -488,7 +488,7 @@ not need. Three options narrow it, and the skill teaches all three.
 `--fields` narrows the `--json` projection on `list`, `next`, `wip` and `find` to the columns named —
 `--fields id,wsjf,title` is a third the size of the whole thing. The names are the ones that appear
 on the wire, they are taken from the projection itself rather than a list kept alongside it, and an
-unrecognised one is a usage error listing the real ones. Asking for a field a particular ticket
+unrecognized one is a usage error listing the real ones. Asking for a field a particular ticket
 does not carry leaves it absent, exactly as it would be without the option: absent means absent.
 
 On `show`, `--section` does the same to the body — `--section description`, `acceptance-criteria`,

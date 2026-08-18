@@ -1,6 +1,6 @@
 ---
 name: backlog
-description: Read and update the Noogen company backlog — a WSJF-prioritised Kanban board of work items stored in Google Drive. Use whenever asked what to work on next, what is in flight, how work is progressing, or to file, score, start, block, or finish a ticket. Triggers on "backlog", "work item", "ticket", "what's next", "WSJF", "priorities", "what am I working on", "WIP", "cycle time".
+description: Read and update the Noogen company backlog — a WSJF-prioritized Kanban board of work items stored in Google Drive. Use whenever asked what to work on next, what is in flight, how work is progressing, or to file, score, start, block, or finish a ticket. Triggers on "backlog", "work item", "ticket", "what's next", "WSJF", "priorities", "what am I working on", "WIP", "cycle time".
 ---
 
 # Noogen backlog
@@ -144,6 +144,40 @@ backlog edit NG-12 --description-file new.md --note "why it changed"
 Passing `""` is refused rather than treated as "empty it". An edit writes no Activity Log entry on
 its own — `--note` records one in the same write, instead of a second `note` command.
 
+### Write it so a stranger can read it
+
+A ticket is read months later by somebody with none of this conversation and often none of the
+codebase. Name the command, the file and the exit code in full; "as discussed" and "the usual place"
+are not facts a reader can use.
+
+Active voice, short sentences, third person — no `I` or `we`, since a ticket outlives whoever filed
+it. One idea per paragraph, three sentences at most. Use one name per thing, the one the code uses.
+
+Write a concrete actor doing a concrete thing, never `[Noun] + [Hype Verb] + [Abstract Concept]`:
+
+```
+not this:  Improve error handling robustness
+           (no actor, no result, and it cannot be scored)
+this:      backlog new exits 0 after the shell truncates a description
+           (a fact, and you can tell when it is fixed)
+```
+
+Every claim carries the thing behind it — the file, the exit code, the count you observed. If you
+cannot name it, delete the claim rather than leaving a bracketed placeholder for somebody to fill
+in; a placeholder reads downstream as a fact. Cut filler openers ("It is important to note", "In
+order to", "Furthermore"), and stop at the last fact — no optimistic closing summary.
+
+The acceptance-criteria example below is the style: an observable outcome per line, not an activity.
+
+Spell in US English — `behavior`, `organization`, `normalize`. Drive's index matches whole words,
+so a ticket written `organisation` never answers `find "organization"`. A flag or a status keeps
+its own spelling: `archive --as cancelled` is the wire value, not a typo.
+
+**This governs prose you author, never prose somebody else wrote.** Both prose options replace the
+whole section, so a pass to restyle old tickets deletes an author's words. Read
+`references/writing-style.md` for the per-field shape — title, description, criteria, and the notes
+that land in the Activity Log.
+
 ### Acceptance criteria are yours to write, not to leave as *TODO*
 
 A ticket filed with no acceptance criteria says `- [ ] *TODO*`, which reads to everyone downstream
@@ -194,7 +228,7 @@ Deeper levels nest as you would expect, and Docs renders them the same way.
    Editing a ticket *document* by hand is fine and expected; `reindex` folds those edits back in.
 
 3. **Only unstarted work is ranked.** WSJF sequences what to *start*, so `score` is refused on a
-   started item and its numbers freeze as history. Do not re-prioritise work in flight — if it
+   started item and its numbers freeze as history. Do not re-prioritize work in flight — if it
    genuinely should stop, `restore` it to the backlog and say so.
 
 4. **Respect the WIP limit.** `start` refuses to exceed it, and that refusal is the system working.

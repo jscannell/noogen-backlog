@@ -32,7 +32,7 @@ is what stops everything drifting to the middle.
 Each is a Sheet column of the same name; the short flag and the spelled-out one are the same
 option.
 
-**`--bv` / `--business-value` — Business Value.** What the organisation or its users gain. Revenue,
+**`--bv` / `--business-value` — Business Value.** What the organization or its users gain. Revenue,
 cost avoided, a customer unblocked, a risk of churn removed. Ask: if we shipped only this, who
 would notice?
 
