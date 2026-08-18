@@ -1,13 +1,12 @@
 ---
 name: backlog
-description: Read and update the Noogen company backlog — a WSJF-prioritized Kanban board of work items stored in Google Drive. Use whenever asked what to work on next, what is in flight, how work is progressing, or to file, score, start, block, or finish a ticket. Triggers on "backlog", "work item", "ticket", "what's next", "WSJF", "priorities", "what am I working on", "WIP", "cycle time".
+description: The Noogen backlog - a WSJF-prioritized Kanban board of tickets in Google Drive. File, score, start, block or finish a work item; answer what's next, what is in flight, WIP, priorities, cycle time.
 ---
 
 # Noogen backlog
 
-Work items live in a Google Drive shared drive: one Google Doc per ticket, written and read as
-markdown, indexed by a Google Sheet. Reach everything through the `backlog` CLI — never edit the
-Sheet directly, and never hand-write a ticket document.
+One Google Doc per ticket in a shared drive, indexed by a Google Sheet. Reach everything through
+the `backlog` CLI — never edit the Sheet directly, and never hand-write a ticket document.
 
 ## The model
 
@@ -31,21 +30,12 @@ backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
             [--bv N --tc N --rroe N --size N]
-            [--description "..."] [--acceptance-criteria "..."]
+            [--description-file body.md] [--acceptance-criteria-file ac.md]
 backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
-                  [--description "..."] [--acceptance-criteria "..."] [--note "..."]
+                  [--description-file new.md] [--acceptance-criteria-file ac.md]
+                  [--note-file why.md]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
-backlog note <id> --text "..."                  # appends to the Activity Log
-
-# every prose option comes off the command line entirely — see below.
-# --description, --acceptance-criteria, --note, --text and --reason each also
-# answer to --<name>-file <path>, and to --<name> - for a pipe.
-backlog new --title "..." --description-file body.md --acceptance-criteria-file ac.md
-backlog edit <id> --description-file new.md --note-file why.md
-Get-Content body.md -Raw | backlog new --title "..." --description -
-
-# score flags also accept their spelled-out forms, which is what the Sheet's
-# columns are called: --business-value --time-criticality --risk-opportunity --job-size
+backlog note <id> --text-file note.md           # appends to the Activity Log
 
 backlog start <id> [--owner me] [--force]       # Backlog -> In Progress
 backlog block <id> --reason "..." | backlog unblock <id> | backlog review <id>
@@ -55,136 +45,99 @@ backlog restore <id>                            # Archive -> Backlog
 backlog doctor | backlog reindex                # health check / repair
 ```
 
+Every prose option — `description`, `acceptance-criteria`, `note`, `text`, `reason` — takes three
+spellings: `--<name> "..."`, `--<name>-file <path>`, and `--<name> -` for a pipe. Prefer the file;
+see "Giving prose to the CLI" below.
+
 ## Read cheaply
 
-Backlog output is large and you pay for all of it. The same answer differs by more than 10x
-depending on how you ask, so ask narrowly:
+Output is large and you pay for all of it — the same answer differs by more than 10x depending on
+how you ask.
 
-- **Answer the question that was asked.** `next` and `wip` cost ~20 tokens. `list` costs ~1,300 and
-  `list --json` ~4,300. "What should I work on?" is `next`, not `list`.
-- **Cap the queue.** `list --top 10` is a fifth of a bare `list`. Ask for all 40+ rows only when the
-  question genuinely spans the whole backlog.
-- **Human output is the default.** The table carries the same facts as `--json` at a quarter of the
-  size, and you can read it. Reach for `--json` only when you need a field the table does not show
-  — then narrow it: `--fields id,wsjf,title` on `list`, `next`, `wip`, and `find`.
-- **Looking for a particular ticket is `find`, never `list`.** Pulling the whole queue to string-match
-  it yourself costs ~4,300 tokens, misses everything in flight or archived, and cannot see prose at
-  all. `find "rate limit"` costs a fraction of that and searches all three tabs.
-- **`show` before an edit is `show --section`.** `--section description`,
-  `--section acceptance-criteria`, `--section notes`, `--section activity-log`, or any heading the
-  document has. One section instead of a whole document.
-- **`show` trims the Activity Log** to the last few entries; on a ticket that has been worked, the
-  log is most of the body. `--full` prints all of it and is rarely what you want.
+- **Answer the question asked.** `next` and `wip` cost ~20 tokens; `list` ~1,300 and `list --json`
+  ~4,300. "What should I work on?" is `next`.
+- **Cap the queue.** `list --top 10` is a fifth of a bare `list`.
+- **Human output is the default** — the same facts as `--json` at a quarter of the size. Reach for
+  `--json` only for a field the table omits, then narrow it with `--fields id,wsjf,title`.
+- **Finding a ticket is `find`, never `list`.** `list` misses everything in flight or archived and
+  cannot see prose at all.
+- **`show` before an edit is `show --section description`** (or `acceptance-criteria`, `notes`,
+  `activity-log`, or any heading the document has). One section instead of a whole document.
+- **`show` trims the Activity Log** to the last few entries; `--full` prints all of it and rarely
+  earns its cost.
 
 ## Search before you file
 
 `backlog new` will happily file the ticket that already exists. **Run `find` first** whenever you
-are about to file something, or whenever you are asked whether the backlog covers a topic. It is
-the only verb that spans all three tabs and the only one that reads a ticket's prose.
+are about to file something, or are asked whether the backlog covers a topic. It is the only verb
+that spans all three tabs and the only one that reads prose.
 
-```
-backlog find "rate limit"
-backlog find "rate limit" --json --fields id,title,phase,match
-```
+Every hit says which of two sources matched:
 
-Every hit says which of two sources matched, and they behave differently:
+- **`name`** — id, title, area or owner, from the index. Exact and immediate, so a ticket filed a
+  minute ago is found by its title.
+- **`body`** — the document text, from Drive's full-text index. The only route to a description or
+  acceptance criteria, with three limits: it matches whole words (`limit` misses *limiting*), it
+  may not yet know about a document written minutes ago, and it searches the whole document
+  including the Activity Log.
 
-- **`name`** — a substring of the id, title, area or owner, from the index. Exact and immediate, so
-  a ticket filed a minute ago is found by its title.
-- **`body`** — the document's text, from Drive's full-text index. This is the only way to reach a
-  description or acceptance criteria, and it has three limits: it matches **whole words**
-  (`find limit` does not match *limiting*), it may **not yet know** about a document written in the
-  last few minutes, and it searches the **whole document** including the Activity Log.
-
-So a `find` that returns nothing means "no ticket names this and no indexed document contains this
-word" — not "no such ticket". If a search comes back empty and you are unsure, try the distinctive
-noun on its own rather than a phrase, and say what you searched for when you report the result.
-
-The search text is one positional argument, so quote it. If the shell splits it the command exits 2
-rather than searching for a fragment.
+An empty `find` means "no ticket names this and no indexed document contains this word", not "no
+such ticket" — retry with the distinctive noun alone, and say what you searched for. Quote the
+search text; it is one positional argument, and a split exits 2.
 
 ## Do not verify writes
 
-**Exit 0 is the confirmation.** A command that succeeded did what it said, so do not `show` the
-ticket again to check, and do not run `doctor` after a write. `doctor` is for suspected damage, not
-for reassurance.
-
-There is no half-written state to check for. A rate-limited request is *rejected*, never partly
-applied, so a command that fails with `rate-limited` wrote nothing.
+**Exit 0 is the confirmation.** Do not `show` the ticket again to check, and do not run `doctor`
+after a write; `doctor` is for suspected damage, not reassurance. A rate-limited request is
+*rejected*, never partly applied, so a command that fails with `rate-limited` wrote nothing.
 
 ## Times
 
-Human output renders in the backlog's configured timezone; `--utc` opts out. **`--json` is always
-UTC** — parse that, and convert for display.
+Human output renders in the configured timezone; `--utc` opts out. **`--json` is always UTC.**
 
-Ticket documents carry **no timestamps, phase, or work state**: those live in the Sheet, in Drive's
-file metadata, and narratively in the Activity Log. If asked when something started, use
-`backlog show <id>` rather than reading the document.
+Ticket documents carry **no timestamps, phase, or work state** — those live in the Sheet and,
+narratively, in the Activity Log. If asked when something started, use `backlog show <id>`.
 
 ## The ticket document
 
-An `# <ID> — <Title>` heading, then `- **Key:** value` bullets for type, area, owner and the four
-scores, then the prose sections. The heading is the only place the id and title live, and `show`
-prints the prose from the first section onwards.
+An `# <ID> — <Title>` heading, then `- **Key:** value` bullets, then the prose sections. The
+heading is the only home of the id and title.
 
 **The CLI writes the heading and the bullets; below them it touches three things.**
 `--description` replaces `## Description`, `--acceptance-criteria` replaces
 `## Acceptance Criteria`, and `note` appends to the Activity Log. Everything else — `## Notes`,
-anything a person added — is theirs, so to change one of those, give them the document URL from
-`backlog show <id>` to edit in Docs.
+anything a person added — is theirs: give them the document URL from `show` to edit in Docs.
 
-Both prose options **replace** the whole section, so read the current text first and pass the whole
-new version, not just the part that changed:
+Both prose options **replace** the whole section, so read it first and pass the whole new version:
 
 ```
-backlog show NG-12 --section description       # just that section
+backlog show NG-12 --section description
 backlog edit NG-12 --description-file new.md --note "why it changed"
 ```
 
 Passing `""` is refused rather than treated as "empty it". An edit writes no Activity Log entry on
-its own — `--note` records one in the same write, instead of a second `note` command.
+its own — `--note` records one in the same write.
 
 ### Write it so a stranger can read it
 
 A ticket is read months later by somebody with none of this conversation and often none of the
-codebase. Name the command, the file and the exit code in full; "as discussed" and "the usual place"
-are not facts a reader can use.
+codebase. Name the command, the file and the exit code in full. Active voice, third person, one
+idea per paragraph. Spell in US English — but a flag keeps its own spelling, so
+`archive --as cancelled` is the wire value, not a typo.
 
-Active voice, short sentences, third person — no `I` or `we`, since a ticket outlives whoever filed
-it. One idea per paragraph, three sentences at most. Use one name per thing, the one the code uses.
+Write a concrete actor doing a concrete thing, never `[Noun] + [Hype Verb] + [Abstract Concept]`.
+`Improve error handling robustness` names no actor and cannot be scored; `backlog new exits 0
+after the shell truncates a description` can be checked. Every claim carries the thing behind it —
+the file, the exit code, the count you observed — or it goes.
 
-Write a concrete actor doing a concrete thing, never `[Noun] + [Hype Verb] + [Abstract Concept]`:
-
-```
-not this:  Improve error handling robustness
-           (no actor, no result, and it cannot be scored)
-this:      backlog new exits 0 after the shell truncates a description
-           (a fact, and you can tell when it is fixed)
-```
-
-Every claim carries the thing behind it — the file, the exit code, the count you observed. If you
-cannot name it, delete the claim rather than leaving a bracketed placeholder for somebody to fill
-in; a placeholder reads downstream as a fact. Cut filler openers ("It is important to note", "In
-order to", "Furthermore"), and stop at the last fact — no optimistic closing summary.
-
-The acceptance-criteria example below is the style: an observable outcome per line, not an activity.
-
-Spell in US English — `behavior`, `organization`, `normalize`. Drive's index matches whole words,
-so a ticket written `organisation` never answers `find "organization"`. A flag or a status keeps
-its own spelling: `archive --as cancelled` is the wire value, not a typo.
-
-**This governs prose you author, never prose somebody else wrote.** Both prose options replace the
-whole section, so a pass to restyle old tickets deletes an author's words. Read
-`references/writing-style.md` for the per-field shape — title, description, criteria, and the notes
-that land in the Activity Log.
+**This governs prose you author, never prose somebody else wrote:** both options replace the whole
+section, so a pass to restyle old tickets deletes an author's words. Read
+`references/writing-style.md` before writing a title, description, criteria or note.
 
 ### Acceptance criteria are yours to write, not to leave as *TODO*
 
-A ticket filed with no acceptance criteria says `- [ ] *TODO*`, which reads to everyone downstream
-as ready when nobody has said what "done" means. **Write them.** You do not need permission, and
-you do not need to hand anyone a Docs link — `--acceptance-criteria` is a first-class flag on both
-`new` and `edit`. Write a markdown checklist, one line per condition, each one something a person
-could check without asking what you meant:
+A ticket filed without them says `- [ ] *TODO*`, which reads downstream as ready when nobody has
+said what "done" means. **Write them** — a checklist, one checkable condition per line:
 
 ```
 - [ ] `backlog doctor` reports the duplicate row and exits 1
@@ -194,46 +147,38 @@ could check without asking what you meant:
 
 If you genuinely cannot tell what "done" means, file the ticket anyway rather than blocking, then
 **say in your reply that the criteria are still `*TODO*` and what you would need to write them**
-(`backlog new` prints that reminder on stderr too). Never leave the placeholder silently and report
-the ticket as filed. The same goes for the description: file with one, or say that you did not.
+(`new` prints that on stderr too). Never leave the placeholder silently and report the ticket as
+filed. The same goes for the description: file with one, or say that you did not.
 
 ### Giving prose to the CLI
 
-**Pass anything longer than a line as `--description-file <path>` or
-`--acceptance-criteria-file <path>`, not inline** — a checklist almost always qualifies.
-`--description -` reads stdin instead; only one option per command may.
-
-The reason is the shell, not the tool: PowerShell splits an argument at an embedded double quote,
-and a file path cannot be split whatever it contains. The CLI refuses a split value with exit 2
-rather than filing a truncated ticket — if you see that, switch to a file. `references/prose-input.md`
-has the full rules (empty input, values beginning with two dashes, one stdin reader per command).
-
-**Every prose option takes a file.** `--description`, `--acceptance-criteria`, `--note`, `--text`
-and `--reason` each answer to `--<name>-file <path>` and to `--<name> -`. A note explaining why an
-edit happened is the one most likely to be long and to quote somebody, so give it as a file:
-`backlog edit NG-12 --description-file new.md --note-file why.md`.
+**Pass anything longer than a line as `--<name>-file <path>`, not inline** — a checklist almost
+always qualifies. `--<name> -` reads stdin, and only one option per command may. The reason is the
+shell: PowerShell splits an argument at an embedded double quote, and the CLI refuses the split
+value with exit 2 rather than filing a truncated ticket.
 
 **Headings inside a section start at `###`.** A section ends at the next heading of its own level
-or higher, so a `##` in a description or a set of criteria is a sibling of `## Description` rather
-than part of it. The CLI refuses one and names the heading; write `### Problem`, not `## Problem`.
-Deeper levels nest as you would expect, and Docs renders them the same way.
+or higher, so a `##` is a sibling of `## Description` rather than part of it. The CLI refuses one
+and names the heading.
+
+`references/prose-input.md` has the rest: empty input, values beginning with two dashes, one stdin
+reader per command, and why the `###` rule is a refusal rather than a fix-up.
 
 ## Rules
 
-1. **Archive, never delete.** Nothing is ever trashed. If asked to delete a ticket, archive it as
-   `cancelled` or `duplicate` instead.
+1. **Archive, never delete.** If asked to delete a ticket, archive it as `cancelled` or
+   `duplicate` instead.
 
-2. **Go through the CLI.** The Sheet owns the `Cost of Delay`, `WSJF`, and `Rank` formulas, and
-   writing those cells by hand breaks the index — `doctor` detects it, `reindex` repairs it.
-   Editing a ticket *document* by hand is fine and expected; `reindex` folds those edits back in.
+2. **Go through the CLI.** The Sheet owns the `Cost of Delay`, `WSJF` and `Rank` formulas, and
+   writing those cells by hand breaks the index. Editing a ticket *document* by hand is fine and
+   expected — `reindex` folds it back in.
 
-3. **Only unstarted work is ranked.** WSJF sequences what to *start*, so `score` is refused on a
-   started item and its numbers freeze as history. Do not re-prioritize work in flight — if it
-   genuinely should stop, `restore` it to the backlog and say so.
+3. **Only unstarted work is ranked.** `score` is refused on a started item and its numbers freeze
+   as history. If work in flight genuinely should stop, `restore` it to the backlog and say so.
 
 4. **Respect the WIP limit.** `start` refuses to exceed it, and that refusal is the system working.
-   Report it and suggest finishing something; only use `--force` if the person explicitly asks
-   after being told.
+   Report it and suggest finishing something; use `--force` only if the person asks after being
+   told.
 
 5. **Verbs are the transitions.** There is no `--status` flag. Use `start`, `block`, `unblock`,
    `review`, `archive`, `restore`.
@@ -241,23 +186,22 @@ Deeper levels nest as you would expect, and Docs renders them the same way.
 ## Scoring
 
 WSJF = (business value + time criticality + risk reduction/opportunity enablement) ÷ job size,
-each on the modified-Fibonacci scale `1, 2, 3, 5, 8, 13, 20`.
+each on the modified-Fibonacci scale `1, 2, 3, 5, 8, 13, 20`. Scores are **relative, not
+absolute** — the smallest item in each column should be a 1. Read `references/wsjf.md` for what
+each dimension means before scoring.
 
-Scores are **relative, not absolute** — the smallest item in each column should be a 1. When
-scoring, read `references/wsjf.md` for what each dimension means and how to calibrate.
-
-Never invent scores silently. If asked to file a ticket without enough information to score it,
-create it unscored (it sorts last) and say it needs scoring.
+Never invent scores silently. Without enough information to score it, file it unscored (it sorts
+last) and say it needs scoring.
 
 ## Setup and authentication
 
 Each person signs in as themselves with `backlog login`, which opens a browser once. If a command
 fails with `not-signed-in`, tell them to run it — do not authenticate on their behalf, and never
-read, copy, print, or move anything under the credentials directory.
+read, copy, print or move anything under the credentials directory.
 
-A command may pause and print `Google is rate limiting requests; waiting …` on stderr. That is
-normal; it retries on its own. Never work around a rate limit by editing the Sheet directly.
+`Google is rate limiting requests; waiting …` on stderr is normal; it retries on its own. Never
+work around a rate limit by editing the Sheet directly.
 
-If a command reports no backlog is configured, someone needs to run
+If no backlog is configured, someone needs to run
 `backlog init --drive <sharedDriveId> --timezone <IANA>` once. See the repo README for the
 one-time OAuth client setup; do not attempt to create credentials yourself.
