@@ -340,6 +340,15 @@ These are the things to be careful about; most of the design follows from them.
   spellings for any option name, decoding UTF-8 after a BOM and falling back to the console
   encoding rather than emitting `U+FFFD`. Only one option per command may read stdin — there is
   one pipe, and the second reader would report the text as empty, naming the wrong problem.
+
+  **Every** prose option, which is `description`, `acceptance-criteria`, `note`, `text` and
+  `reason` — not only the two that write a section. A shell splits a note exactly as it splits a
+  description, and the notes worth writing are the long ones. `Verbs.Prose(name)` derives the
+  `-file` spelling from the option's own name rather than listing it beside each entry, because
+  the table and `ReadProse` have to agree: a name spelled separately in the two places could
+  declare a flag the reader never looks at, which is the silent no-op that table exists to
+  prevent. `TextInput.RequireProse` is the same read for an option its verb cannot run without,
+  and it names both spellings when nothing was given.
 - Always write tests, named `MethodUnderTest_Scenario_ExpectedBehavior`. Update READMEs and the
   skill when the command surface changes.
 - [Conventional Commits](https://www.conventionalcommits.org/) (`feat(backlog): ...`).

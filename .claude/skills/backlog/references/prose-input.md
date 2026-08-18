@@ -7,9 +7,14 @@ to pass a description or a set of acceptance criteria and want the rules rather 
 
 | you have | use |
 |---|---|
-| text longer than a line | `--description-file <path>` / `--acceptance-criteria-file <path>` |
-| text already in a pipe | `--description -` (only one option per command may read stdin) |
+| text longer than a line | `--<name>-file <path>` |
+| text already in a pipe | `--<name> -` (only one option per command may read stdin) |
 | a single short line, no quotes | inline is fine |
+
+The prose options are `--description`, `--acceptance-criteria`, `--note`, `--text` and `--reason`,
+and **each of them answers to all three spellings**. `--note-file` and `--text-file` are not
+afterthoughts: a note saying why an edit happened is often the longest thing typed at a backlog
+command, and it is the one most likely to quote somebody.
 
 ## Why a file rather than the command line
 

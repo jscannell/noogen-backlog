@@ -28,8 +28,15 @@ namespace Noogen.Backlog.Cli
         /// </summary>
         public static string? ReadAcceptanceCriteria(CommandLine command) => ReadProse(command, "acceptance-criteria");
 
-        /// <summary>Every prose option a verb can carry, in the order a command line lists them.</summary>
-        static readonly string[] ProseOptions = ["description", "acceptance-criteria"];
+        /// <summary>
+        /// Every prose option a verb can carry, in the order a command line lists them.
+        ///
+        /// All of them, not only the two that write a section. A note, a block reason and the text
+        /// of `backlog note` are free text a person writes, so a shell splits them exactly as it
+        /// split a description — and `edit` can now be given three of them at once, which is what
+        /// makes the shared-stdin check below more than a formality.
+        /// </summary>
+        static readonly string[] ProseOptions = ["description", "acceptance-criteria", "note", "text", "reason"];
 
         /// <summary>
         /// Refuses the one combination a shell cannot deliver. Standard input is a single stream,
@@ -83,6 +90,17 @@ namespace Noogen.Backlog.Cli
         }
 
         /// <summary>
+        /// The same, for an option the verb cannot run without — `note --text`, `block --reason`.
+        /// The refusal names both spellings, because "--text is required" would send someone back
+        /// to the command line that just failed to survive their quoting.
+        /// </summary>
+        public static string RequireProse(CommandLine command, string name) =>
+            ReadProse(command, name)
+            ?? throw new UsageException(
+                $"--{name} is required. Pass it inline for a short line, or as --{name}-file <path> "
+                + $"— or --{name} - to read it from a pipe — for anything longer.");
+
+        /// <summary>
         /// Reads <paramref name="source"/> — a file path, or <see cref="StandardInput"/>.
         /// <paramref name="flag"/> is the option that named it, so an error can quote what was
         /// actually typed.
@@ -118,8 +136,8 @@ namespace Noogen.Backlog.Cli
             if (!Console.IsInputRedirected)
             {
                 throw new UsageException(
-                    $"{flag} - reads the description from standard input, but nothing is piped in. "
-                    + "Pipe it (Get-Content body.md -Raw | backlog ...) or use --description-file instead.");
+                    $"{flag} - reads from standard input, but nothing is piped in. "
+                    + $"Pipe it (Get-Content body.md -Raw | backlog ...) or use {flag}-file <path> instead.");
             }
 
             using var stream = Console.OpenStandardInput();

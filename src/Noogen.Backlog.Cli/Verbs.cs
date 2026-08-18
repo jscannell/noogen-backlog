@@ -57,11 +57,16 @@ namespace Noogen.Backlog.Cli
         /// corrected through the same surface, and acceptance criteria left to Docs alone were the
         /// ones that never got written.
         /// </summary>
-        static readonly string[] ProseFlags =
-        [
-            "description", "description-file",
-            "acceptance-criteria", "acceptance-criteria-file"
-        ];
+        static readonly string[] ProseFlags = [.. Prose("description"), .. Prose("acceptance-criteria")];
+
+        /// <summary>
+        /// The spellings one prose option answers to. The `-file` name is derived rather than
+        /// written out beside each one, because the two have to agree: <see cref="TextInput"/>
+        /// builds the same name from the same rule when it reads the option, and a table that
+        /// spelled it separately could declare a flag the reader never looks at — which is the
+        /// silent no-op this table exists to prevent.
+        /// </summary>
+        static string[] Prose(string name) => [name, name + "-file"];
 
         static readonly Dictionary<string, string[]> Accepted = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -77,14 +82,14 @@ namespace Noogen.Backlog.Cli
             ["flow"] = ["since"],
             ["show"] = ["section", "full"],
             ["new"] = ["title", "type", "area", "owner", .. ProseFlags, .. ScoreFlags],
-            ["edit"] = ["title", "area", "owner", "type", "note", .. ProseFlags],
+            ["edit"] = ["title", "area", "owner", "type", .. Prose("note"), .. ProseFlags],
             ["score"] = [.. ScoreFlags],
-            ["note"] = ["text"],
+            ["note"] = [.. Prose("text")],
             ["start"] = ["owner", "force"],
-            ["block"] = ["reason"],
+            ["block"] = [.. Prose("reason")],
             ["unblock"] = [],
             ["review"] = [],
-            ["archive"] = ["as", "note"],
+            ["archive"] = ["as", .. Prose("note")],
             ["restore"] = [],
             ["reindex"] = [],
             ["doctor"] = []

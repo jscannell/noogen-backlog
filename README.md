@@ -406,8 +406,11 @@ backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."
 
-# either section is safer given as a file or a pipe than as an argument, at any length:
+# every prose option is safer given as a file or a pipe than as an argument, at any length.
+# --description, --acceptance-criteria, --note, --text and --reason each also answer to
+# --<name>-file <path>, and to --<name> - for a pipe:
 #   backlog new --title "..." --description-file body.md --acceptance-criteria-file ac.md
+#   backlog edit <id> --description-file new.md --note-file why.md
 #   Get-Content body.md -Raw | backlog new --title "..." --description -
 
 # the score flags are also spelled out, for anyone who prefers them:
@@ -534,13 +537,21 @@ first quote missing, and the command exited 0.
 
 ### Giving prose that the shell cannot damage
 
-`--description` and `--acceptance-criteria` are fine for a line. For anything longer, or anything
-containing a quote, use one of the two paths that never reach the command line:
+Inline is fine for a line. For anything longer, or anything containing a quote, use one of the two
+paths that never reach the command line:
 
 ```powershell
 backlog new --title "Rework the importer" --description-file body.md --acceptance-criteria-file ac.md
+backlog edit NG-12 --description-file body.md --note-file why.md
 Get-Content body.md -Raw | backlog new --title "Rework the importer" --description -
 ```
+
+This is every option that carries free text, not only the two that write a section:
+`--description`, `--acceptance-criteria`, `--note`, `--text` and `--reason`. The shell splits a
+note exactly as it splits a description, and the notes worth writing — why an edit happened, what
+a ticket is blocked on — are the long ones. `Verbs` derives each `-file` spelling from the option's
+own name rather than listing it separately, so a prose option cannot be declared with a flag the
+reader never looks at.
 
 A path is a single argument whatever is inside the file it points at, and a pipe is not an
 argument at all. Both accept `-` for standard input, both refuse a file or a pipe that turned out

@@ -37,8 +37,11 @@ backlog edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
 backlog score <id> [--bv N] [--tc N] [--rroe N] [--size N]
 backlog note <id> --text "..."                  # appends to the Activity Log
 
-# both prose options also come off the command line entirely — see below
+# every prose option comes off the command line entirely — see below.
+# --description, --acceptance-criteria, --note, --text and --reason each also
+# answer to --<name>-file <path>, and to --<name> - for a pipe.
 backlog new --title "..." --description-file body.md --acceptance-criteria-file ac.md
+backlog edit <id> --description-file new.md --note-file why.md
 Get-Content body.md -Raw | backlog new --title "..." --description -
 
 # score flags also accept their spelled-out forms, which is what the Sheet's
@@ -170,6 +173,11 @@ The reason is the shell, not the tool: PowerShell splits an argument at an embed
 and a file path cannot be split whatever it contains. The CLI refuses a split value with exit 2
 rather than filing a truncated ticket — if you see that, switch to a file. `references/prose-input.md`
 has the full rules (empty input, values beginning with two dashes, one stdin reader per command).
+
+**Every prose option takes a file.** `--description`, `--acceptance-criteria`, `--note`, `--text`
+and `--reason` each answer to `--<name>-file <path>` and to `--<name> -`. A note explaining why an
+edit happened is the one most likely to be long and to quote somebody, so give it as a file:
+`backlog edit NG-12 --description-file new.md --note-file why.md`.
 
 **Headings inside a section start at `###`.** A section ends at the next heading of its own level
 or higher, so a `##` in a description or a set of criteria is a sibling of `## Description` rather

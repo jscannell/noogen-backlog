@@ -232,5 +232,94 @@ namespace Noogen.Backlog.Tests
 
             Assert.Equal("a “quoted” line", Describe("new", "--description-file", path));
         }
+
+        // --- the other prose options ---
+
+        /// <summary>
+        /// A note is free text a person writes, so a shell splits it exactly as it split a
+        /// description. It only ever had the one spelling, which meant the longest notes — the
+        /// ones explaining why an edit happened — were the ones most likely to be torn apart.
+        /// </summary>
+        [Fact]
+        public void ReadProse_NoteFromAFile_ReturnsEveryCharacterIncludingQuotes()
+        {
+            var note = "amended after review: they said \"do it the other way\" and were right";
+            var path = Write("note.md", note);
+
+            var command = CommandLine.Parse(["edit", "NG-12", "--note-file", path]);
+
+            Assert.Equal(note, TextInput.ReadProse(command, "note"));
+        }
+
+        [Fact]
+        public void RequireProse_TextFromAFile_ReturnsIt()
+        {
+            var path = Write("text.md", "a note with \"quotes\" in it");
+
+            var command = CommandLine.Parse(["note", "NG-12", "--text-file", path]);
+
+            Assert.Equal("a note with \"quotes\" in it", TextInput.RequireProse(command, "text"));
+        }
+
+        [Fact]
+        public void RequireProse_ReasonFromAFile_ReturnsIt()
+        {
+            var path = Write("reason.md", "waiting on the \"platform\" team");
+
+            var command = CommandLine.Parse(["block", "NG-12", "--reason-file", path]);
+
+            Assert.Equal("waiting on the \"platform\" team", TextInput.RequireProse(command, "reason"));
+        }
+
+        /// <summary>
+        /// The refusal has to name the way in that would have worked, or it sends someone back to
+        /// the command line that just failed to survive their quoting.
+        /// </summary>
+        [Fact]
+        public void RequireProse_OptionGivenNoWayAtAll_NamesBothSpellings()
+        {
+            var command = CommandLine.Parse(["note", "NG-12"]);
+
+            var exception = Assert.Throws<UsageException>(() => TextInput.RequireProse(command, "text"));
+
+            Assert.Contains("--text-file", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void ReadProse_NoteGivenBothSpellings_Refuses()
+        {
+            var path = Write("note2.md", "from the file");
+            var command = CommandLine.Parse(["edit", "NG-12", "--note", "inline", "--note-file", path]);
+
+            Assert.Throws<UsageException>(() => TextInput.ReadProse(command, "note"));
+        }
+
+        [Fact]
+        public void ReadProse_NoteNotGiven_ReturnsNull()
+        {
+            Assert.Null(TextInput.ReadProse(CommandLine.Parse(["edit", "NG-12", "--title", "x"]), "note"));
+        }
+
+        /// <summary>
+        /// There is one pipe, and `edit` can now be handed three prose options at once. The second
+        /// reader would find it already drained and report "came back empty", naming the wrong
+        /// problem — so the combination is refused before either is read.
+        /// </summary>
+        [Fact]
+        public void RejectSharedStandardInput_DescriptionAndNoteBothAskForThePipe_Refuses()
+        {
+            var command = CommandLine.Parse(["edit", "NG-12", "--description", "-", "--note", "-"]);
+
+            var exception = Assert.Throws<UsageException>(() => TextInput.RejectSharedStandardInput(command));
+
+            Assert.Contains("--description", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("--note", exception.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void RejectSharedStandardInput_OnlyTheNoteAsksForThePipe_IsAccepted()
+        {
+            TextInput.RejectSharedStandardInput(CommandLine.Parse(["edit", "NG-12", "--description", "x", "--note", "-"]));
+        }
     }
 }

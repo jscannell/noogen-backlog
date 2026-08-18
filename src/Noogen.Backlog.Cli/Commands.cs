@@ -610,7 +610,7 @@ namespace Noogen.Backlog.Cli
                 Type = command.Has("type") ? Vocabulary.Parse<TicketType>(command.RequireOption("type"), "type") : null,
                 Description = TextInput.ReadDescription(command),
                 AcceptanceCriteria = TextInput.ReadAcceptanceCriteria(command),
-                Note = command.Option("note")
+                Note = TextInput.ReadProse(command, "note")
             };
 
             var ticket = await store.UpdateAsync(id, edit);
@@ -638,7 +638,7 @@ namespace Noogen.Backlog.Cli
             var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            var ticket = await store.AppendNoteAsync(id, command.RequireOption("text"));
+            var ticket = await store.AppendNoteAsync(id, TextInput.RequireProse(command, "text"));
             return Report(command, ticket, $"Noted on {ticket.Id}.");
         }
 
@@ -659,7 +659,7 @@ namespace Noogen.Backlog.Cli
             var store = await StoreAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            var ticket = await store.SetStateAsync(id, WorkState.Blocked, command.RequireOption("reason"));
+            var ticket = await store.SetStateAsync(id, WorkState.Blocked, TextInput.RequireProse(command, "reason"));
             return Report(command, ticket, $"Blocked {ticket.Id}.");
         }
 
@@ -678,7 +678,7 @@ namespace Noogen.Backlog.Cli
             var id = command.RequirePositional(0, "a ticket id");
             var outcome = Vocabulary.Parse<Outcome>(command.Option("as") ?? "done", "outcome");
 
-            var ticket = await store.ArchiveAsync(id, outcome, command.Option("note"));
+            var ticket = await store.ArchiveAsync(id, outcome, TextInput.ReadProse(command, "note"));
             return Report(command, ticket,
                 $"Archived {ticket.Id} as {Vocabulary.ToWire(outcome)} — lead {Output.Number(ticket.LeadDays)}d, cycle {Output.Number(ticket.CycleDays)}d. The document was moved, not deleted.");
         }
