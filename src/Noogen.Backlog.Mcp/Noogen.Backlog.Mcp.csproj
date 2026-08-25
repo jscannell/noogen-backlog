@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The agent-facing front end: the same verbs the CLI offers, served over MCP so a caller that is
+    not a shell on this machine can reach the backlog at all.
+
+    It references the domain library and the verb layer, and deliberately not the CLI. A front end
+    is one way of delivering the surface, not the surface — anything it turned out to need from
+    another front end would mean the line between them is in the wrong place. AssemblyBoundaryTests
+    asserts that direction.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Noogen.Backlog.Mcp</RootNamespace>
+    <AssemblyName>Noogen.Backlog.Mcp</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 2.x is the release line that speaks MCP 2026-07-28: no initialize handshake, no protocol
+         sessions, and server/discover for identity and capabilities. -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Noogen.Backlog\Noogen.Backlog.csproj" />
+    <ProjectReference Include="..\Noogen.Backlog.Verbs\Noogen.Backlog.Verbs.csproj" />
+    <ProjectReference Include="..\Noogen.Providers.GoogleWorkspace\Noogen.Providers.GoogleWorkspace.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Noogen.Backlog.Mcp.Tests" />
+  </ItemGroup>
+
+</Project>

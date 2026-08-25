@@ -2,7 +2,8 @@
 
 A lightweight, company-wide work-item tracker: **one Google Doc per ticket in a Drive shared drive,
 indexed by a Google Sheet, prioritized with WSJF, run as Kanban.** Readable and editable by humans
-in Docs; queryable and writable by agents through the `backlog` CLI.
+in Docs; queryable and writable by agents through the `backlog` CLI or the MCP server that
+serves the same verbs.
 
 Completed work is **archived, never deleted**.
 
@@ -11,6 +12,11 @@ Completed work is **archived, never deleted**.
 The Drive MCP connector is read-and-create only — no update, no move, no delete, and no Sheets
 API at all. An agent could file a ticket through it but never edit one, never archive one, and
 never touch the index. So access goes through this first-party CLI, backed by a service account.
+
+A CLI needs three things per machine, though — install the tool, install the skill, sign in — so a
+client that is not a shell on that machine cannot reach the backlog at all. [The MCP
+server](#the-mcp-server) serves the same verbs to those callers. It is a second way in, not a second
+implementation: both front ends sit on one `BacklogApi` and emit one set of shapes.
 
 ## The model
 
@@ -630,6 +636,130 @@ Failure kinds, all reported as `{"kind": ..., "error": ...}` under `--json`:
 | 3 | `not-signed-in`, `oauth-client-missing`, `oauth-client-invalid` | authentication needs a human |
 | 4 | `rate-limited` | Google throttled us past the retries; try again shortly |
 
+## The MCP server
+
+`Noogen.Backlog.Mcp` serves the same verbs over MCP, so a caller that is not a shell on the machine
+holding the credentials can still reach the backlog. It speaks protocol revision **2026-07-28** over
+Streamable HTTP.
+
+### CLI or server
+
+Reach for the CLI when you are a person at a terminal, or an agent that can shell out on a machine
+where the tool is installed and someone has signed in. It renders tables, resolves times into the
+backlog's timezone, and is the only place `login`, `init` and `install-skill` exist at all.
+
+Reach for the server when none of that is true: a client with no shell, a machine with no `backlog`
+on `PATH`, a fleet where three per-machine setup steps is three too many. It also means a change
+reaches every caller the moment the server restarts, without redistributing a tool.
+
+The two answer identically. `--json` from the CLI and `structuredContent` from the server are the
+same bytes for the same request, because there is one copy of those shapes and both front ends emit
+it.
+
+### Running it
+
+Everything is configured through the environment — the CLI's config file is a person's own state
+and the server does not read it.
+
+| variable | what it is |
+|---|---|
+| `NOOGEN_BACKLOG_SPREADSHEET_ID` | **required.** The Backlog Index spreadsheet. Create one with `backlog init` from the CLI |
+| `NOOGEN_BACKLOG_CREDENTIALS` | a service-account key file — the ordinary answer for a deployed server |
+| `NOOGEN_BACKLOG_OWNER` | who a write is attributed to when the caller names nobody |
+| `NOOGEN_BACKLOG_TOKENS` | a directory of tokens written by `backlog login`, for a server run on a workstation that has already signed in |
+| `NOOGEN_BACKLOG_OAUTH_FILE` | an OAuth client on disk, needed only to refresh a token from the directory above |
+| `NOOGEN_BACKLOG_ACCOUNT` | which stored account to use, when there is more than one |
+
+```bash
+export NOOGEN_BACKLOG_SPREADSHEET_ID=1AbC...
+export NOOGEN_BACKLOG_CREDENTIALS=/etc/noogen/backlog-sa.json
+
+dotnet run --project src/Noogen.Backlog.Mcp
+# listening on http://127.0.0.1:5099
+```
+
+Credentials resolve **once, at startup**, in the order [Authentication](#authentication) describes.
+A server that cannot reach the backlog says why and exits rather than accepting calls it will fail
+one at a time.
+
+It binds loopback by default, and that default is deliberate: this process holds one credential to a
+whole company's backlog and authenticates nobody. Putting it on a network is a decision to make on
+purpose — `ASPNETCORE_URLS` or `--urls` is how — and per-caller identity and authentication are
+NG-0093, not this.
+
+Point a client at `http://127.0.0.1:5099/`. For Claude Code:
+
+```bash
+claude mcp add --transport http backlog http://127.0.0.1:5099/
+```
+
+### What it offers
+
+One tool, `backlog`, taking a verb and an options object:
+
+```json
+{ "verb": "show", "options": { "id": "NG-0007" } }
+```
+
+One rather than one per verb, because a 2026-07-28 server's tool list may not vary per connection or
+as a side effect of another call — a surface cannot be unlocked after discovery, so whatever a
+caller learns, they learn inside a tool result. What is loaded up front is therefore small: the
+server's `instructions`, and one tool definition carrying the verb list. Everything below that is
+asked for.
+
+`options` carries everything the verb reads, including the argument its usage shows in angle
+brackets — `show <id>` is `{"id": "..."}`. Prose is an ordinary JSON string: the CLI's
+`--<name>-file` and `--<name> -` spellings exist to survive a shell splitting a quoted value, and
+there is no shell here, so they are neither offered nor needed.
+
+Every verb the CLI has is offered except four, each of which says why when it is called:
+
+| withheld | because |
+|---|---|
+| `login`, `logout` | the browser would open on the server's machine, and there is no credential of yours here to revoke |
+| `init` | which backlog this server serves is its configuration, not a tool call |
+| `install-skill` | the server cannot reach your `~/.claude`. The same guidance is served as resources |
+
+`json` and `utc` are not options here either. Results are always structured and always UTC.
+
+Three things a caller can ask for rather than carry:
+
+- `{"verb": "help"}` — the whole surface, grouped, generated from the same table the CLI's help is.
+- `{"verb": "help", "options": {"verb": "new"}}` — one verb, and what each option is for.
+- `{"verb": "help", "options": {"topic": "wsjf"}}` — one of four guides: `overview`,
+  `writing-style`, `wsjf`, `prose-input`. These are also MCP resources at
+  `backlog://guide/<topic>`, and they are the skill's own bytes — the same file
+  `backlog install-skill` writes to disk, not a copy.
+
+A refusal names what the verb actually accepts, at the moment it was got wrong, which is what makes
+exploring cheap.
+
+### Two differences worth knowing
+
+**`whoami` answers about the server, not about you, and says as little as it can.** The CLI reports
+a person's own setup — which account is signed in, where the token store is, what protects it. None
+of that exists here: the caller has no credential on this path and the server's is not theirs. So it
+answers with two keys, `owner` and `sharedIdentity`, which is the only part a caller can act on —
+every caller shares one identity, so a ticket does not carry your name unless you pass `owner`.
+
+Which credential was chosen and which spreadsheet it opens are deliberately *not* on the wire: the
+description names a key file's path on the server's filesystem, or the operator's own address, and
+the spreadsheet id is the handle to a whole backlog. Those go to the log at startup, where the
+person who deployed it is looking. The two keys that remain are also the two that stay true once
+callers have identities of their own (NG-0093): `owner` becomes theirs and `sharedIdentity` becomes
+false.
+
+**The text half of a result is a sentence, not the JSON again.** The specification says a structured
+result SHOULD also carry its JSON serialized as text, for a client that reads only `content`. Done
+literally that doubles every response for a reader who is a model paying by the byte. What that
+SHOULD protects is a client that would otherwise get nothing usable, and `Created NG-0042.` serves
+that better than a second copy of the record. `structuredContent` is the contract; `content[0]` says
+what happened.
+
+A refusal is `isError` on the result, never a JSON-RPC error — the call was well formed and the
+backlog said no, which is an answer. Its shape is the CLI's failure shape, `{"kind": ..., "error":
+...}`, under the same one-word kind the CLI turns into an exit code.
+
 ## WSJF
 
 `WSJF = (Business Value + Time Criticality + Risk & Opportunity) / Job Size`, each on the
@@ -658,7 +788,9 @@ its own column; if review later needs its own WIP limit, promoting it to a fourt
 | `Noogen.Backlog` | all the logic — store, lifecycle, index, documents, metrics — and the contract every front end emits: `BacklogApi`, the JSON shapes, the name of a failure |
 | `Noogen.Backlog.Verbs` | the text-verb surface: the verb and option catalog, the generated help, the embedded skill |
 | `Noogen.Backlog.Cli` | thin arg-parsing shell over `BacklogApi`, packaged as a global tool |
+| `Noogen.Backlog.Mcp` | ASP.NET Core MCP server over `BacklogApi`: one tool, every verb, Streamable HTTP |
 | `Noogen.Backlog.Tests` | xUnit against in-memory Drive/Sheets fakes |
+| `Noogen.Backlog.Mcp.Tests` | xUnit over the same fakes, driving the tool directly |
 | `Noogen.Providers.GoogleWorkspace.Tests` | xUnit over a stub HTTP transport, so gateway requests are asserted on the wire |
 
 The logic deliberately lives in a library rather than the CLI: the Noogen platform agent is a

@@ -35,12 +35,16 @@ namespace Noogen.Backlog.Verbs
             "WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20.";
 
         const string McpTrailer =
-            "Results are always structured and always UTC — there is no json or utc option here.\n" +
-            "Prose arrives as an ordinary string, newlines and quotes included, so none of the\n" +
-            "command line's file and stdin spellings are needed.\n" +
-            "\n" +
-            "Ask for one verb by name to see what it takes. WSJF scores are modified Fibonacci:\n" +
-            "1, 2, 3, 5, 8, 13, 20.";
+            "A verb's arguments are the keys of 'options', and a trailing ? marks one the\n"
+            + "verb runs without: 'show {id, section?, full?}' is called as\n"
+            + "{\"verb\": \"show\", \"options\": {\"id\": \"NG-0007\"}}.\n"
+            + "\n"
+            + "Results are always structured and always UTC — there is no json or utc option here.\n"
+            + "Prose arrives as an ordinary string, newlines and quotes included, so none of the\n"
+            + "command line's file and stdin spellings are needed.\n"
+            + "\n"
+            + "Ask for one verb by name to see what it takes. WSJF scores are modified Fibonacci:\n"
+            + "1, 2, 3, 5, 8, 13, 20.";
 
         static string Prefix(VerbSurface surface) => surface == VerbSurface.Cli ? "backlog " : string.Empty;
 
@@ -107,10 +111,21 @@ namespace Noogen.Backlog.Verbs
                 .Append(definition.Name).Append(" — ").Append(definition.Summary).Append("\n\n")
                 .Append("usage:\n").Append(Usage(definition, surface, "  ")).Append('\n');
 
-            if (definition.Positional is not null)
+            // Over MCP there is no argument position to occupy: a positional arrives under
+            // `options` beside everything else, so it is described as one rather than shown
+            // apart. Anywhere else it really is a different kind of thing and reads as one.
+            if (definition.Positional is not null && surface != VerbSurface.Mcp)
                 text.Append("\n  <").Append(definition.PositionalName).Append(">  ").Append(definition.Positional).Append('\n');
 
-            var options = definition.OptionsOn(surface).ToList();
+            var options = new List<VerbOption>();
+
+            if (definition.Positional is not null && surface == VerbSurface.Mcp)
+            {
+                options.Add(new VerbOption(definition.PositionalName, definition.Positional)
+                    { Required = definition.PositionalRequired });
+            }
+
+            options.AddRange(definition.OptionsOn(surface));
 
             if (options.Count > 0)
             {
@@ -125,6 +140,11 @@ namespace Noogen.Backlog.Verbs
 
                     if (option.Required)
                         text.Append("  (required)");
+
+                    // On a command line a valueless option is present or absent; in an object it
+                    // is a value, and the caller has to know which one to write.
+                    if (!option.TakesValue && surface == VerbSurface.Mcp)
+                        text.Append("  (true or false)");
 
                     if (option.Alias is not null)
                         text.Append("  (also ").Append(Dash(surface)).Append(option.Alias).Append(')');
@@ -219,6 +239,6 @@ namespace Noogen.Backlog.Verbs
         static string Indent(string text, string prefix) =>
             string.Join('\n', text.Split('\n').Select(line => line.Length == 0 ? line : prefix + line));
 
-        static string Dash(VerbSurface surface) => surface == VerbSurface.Cli ? "--" : string.Empty;
+        static string Dash(VerbSurface surface) => VerbCatalog.OptionPrefix(surface);
     }
 }

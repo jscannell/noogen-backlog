@@ -157,6 +157,34 @@ namespace Noogen.Backlog.Tests
                 transitions.Where(name => name is "start" or "block" or "unblock" or "review" or "archive" or "restore").ToList());
         }
 
+        /// <summary>
+        /// `help` is declared like anything else so that asking about the surface is part of the
+        /// surface — and so that a verb or an option added above cannot be missing from the answer.
+        /// </summary>
+        [Fact]
+        public void On_Help_IsOfferedEverywhereAndItsGuidesOnlyWhereThereIsNoSkillToInstall()
+        {
+            var help = VerbCatalog.Require("help");
+
+            Assert.True(help.OfferedOn(VerbSurface.Cli));
+            Assert.True(help.OfferedOn(VerbSurface.Mcp));
+
+            Assert.Empty(help.OptionsOn(VerbSurface.Cli));
+            Assert.Equal(["topic"], help.OptionsOn(VerbSurface.Mcp).Select(option => option.Name).ToList());
+        }
+
+        /// <summary>Every guide the catalog names has to be a file the skill actually carries.</summary>
+        [Fact]
+        public void Guides_EveryTopic_IsAFileTheSkillCarries()
+        {
+            foreach (var topic in VerbCatalog.Guides)
+            {
+                var path = topic == "overview" ? EmbeddedSkill.EntryFileName : $"references/{topic}.md";
+
+                Assert.Contains(path, EmbeddedSkill.Files.Select(file => file.RelativePath), StringComparer.Ordinal);
+            }
+        }
+
         // --- usage ---
 
         [Fact]

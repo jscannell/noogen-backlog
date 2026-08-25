@@ -54,6 +54,20 @@ see "Giving prose to the CLI" below.
 same table the parser checks against, so it is never out of date — reach for it rather than
 guessing at a flag, and ask about one verb rather than reading the whole surface.
 
+### If there is no `backlog` on this machine
+
+The same verbs are served over MCP, as one tool taking a verb and an options object:
+`{"verb": "show", "options": {"id": "NG-0007"}}`. Everything else in this skill applies there
+unchanged — the model, reading cheaply, searching before filing, how a ticket is written — with one
+exception: the three spellings of a prose option exist only because a shell damages a quoted value,
+and over MCP prose is an ordinary string.
+
+Do not carry that surface in your head; the tool discloses it. `{"verb": "help"}` writes the whole
+thing, `{"verb": "help", "options": {"verb": "new"}}` writes one verb and what each option is for,
+and the files under `references/` are served there as resources and as
+`{"verb": "help", "options": {"topic": "wsjf"}}`. `login`, `logout`, `init` and `install-skill` are
+not offered and say why when called.
+
 ## Read cheaply
 
 Output is large and you pay for all of it — the same answer differs by more than 10x depending on

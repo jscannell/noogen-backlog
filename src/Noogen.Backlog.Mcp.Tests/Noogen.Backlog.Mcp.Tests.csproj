@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    Noogen.Backlog.Tests is referenced for TestBacklog and the gateway fakes, which are the seam
+    every test above the store already sits on — the point of these tests is that both front ends
+    answer the same way, so they have to be asking the same backlog.
+
+    That reference is one-directional and has to stay that way, which is why the boundary test for
+    this assembly lives here rather than beside the one for the others.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Noogen.Backlog.Mcp\Noogen.Backlog.Mcp.csproj" />
+    <ProjectReference Include="..\Noogen.Backlog.Tests\Noogen.Backlog.Tests.csproj" />
+  </ItemGroup>
+
+</Project>

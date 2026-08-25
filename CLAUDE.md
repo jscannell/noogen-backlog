@@ -10,7 +10,8 @@ first — it covers the model, setup, and command surface.
 ## Architecture
 
 Flow: **front end → `BacklogApi` → `IBacklogStore` → `SheetIndex` / `TicketMover` → gateways →
-Drive + Sheets.** Solution: `src/Noogen.Backlog.slnx`.
+Drive + Sheets.** Solution: `src/Noogen.Backlog.slnx`. Two front ends today, the CLI and the MCP
+server, and they answer identically because there is one copy of every shape.
 
 There is more than one front end, so everything a caller can *see* is emitted from one place
 rather than written out per surface. A front end decides how a request arrives and how an answer is
@@ -38,12 +39,27 @@ check: anything the domain library turns out to need from the verb layer was mis
   Code skill, which teaches these verbs. This is where command vocabulary is allowed to be command
   vocabulary — options that take a value or do not, the `-file` spelling, positional arguments,
   help wrapped to a terminal width.
+- **`Noogen.Backlog.Mcp`** — the agent-facing front end: an ASP.NET Core server speaking MCP
+  revision `2026-07-28` over Streamable HTTP. **One** tool carrying every verb, because that
+  revision forbids a tool list that varies per connection or as a side effect of a call — a surface
+  cannot be unlocked after discovery, so disclosure happens *inside* a result: `help`, `help` with a
+  verb, and a refusal that names what the verb reads. `structuredContent` is `IBacklogView.ToNode`
+  and nothing else; the text half is a sentence rather than the JSON again, which is a deliberate
+  deviation from the spec's SHOULD and is written down in the README. Configuration is the
+  environment only — never `LocalConfig`, which is a person's own state — and credentials resolve
+  once at startup (invariant 17). It acts as **one identity**, so every write lands under one
+  `Owner` unless the caller passes `owner`; per-caller identity and exposure are NG-0093.
+
 - **`Noogen.Backlog.Cli`** — thin shell. Arg parsing, table rendering, exit codes. No logic, and no
   shapes or verb names of its own; `CommandLineRules` only checks a parsed line against the
   catalog. Also what the build embeds the OAuth client *into*, which is why the nupkg is
   the whole distribution. `scripts/deploy.ps1` packs it, replaces the global tool and installs the
   skill — that is the loop after a change.
 - **`Noogen.Backlog.Tests`** — xUnit over the fakes.
+
+- **`Noogen.Backlog.Mcp.Tests`** — xUnit driving the tool method directly over the same fakes.
+  It references `Noogen.Backlog.Tests` for `TestBacklog`, which is why the boundary test for the
+  server assembly lives here rather than beside the others: the dependency has to run one way.
 - **`Noogen.Providers.GoogleWorkspace.Tests`** — xUnit over a stub HTTP transport. The gateways are
   translators from our vocabulary into Google's REST shapes, so what they put on the wire *is* the
   behavior; `StubHttpClientFactory` swaps the handler and leaves the rest of Google's pipeline

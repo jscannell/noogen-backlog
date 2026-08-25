@@ -33,11 +33,16 @@ namespace Noogen.Providers.GoogleWorkspace
     /// </summary>
     public class GoogleCredentialResolver
     {
-        readonly UserCredentialStore _users;
+        readonly UserCredentialStore? _users;
         readonly string? _serviceAccountKeyPath;
         readonly bool _allowApplicationDefault;
 
-        public GoogleCredentialResolver(UserCredentialStore users, string? serviceAccountKeyPath, bool allowApplicationDefault = true)
+        /// <summary>
+        /// <paramref name="users"/> is null where there is no per-user token store to read: a
+        /// server has no signed-in person, and constructing one would create and lock down a
+        /// directory nobody asked for.
+        /// </summary>
+        public GoogleCredentialResolver(UserCredentialStore? users, string? serviceAccountKeyPath, bool allowApplicationDefault = true)
         {
             _users = users;
             _serviceAccountKeyPath = serviceAccountKeyPath;
@@ -61,7 +66,7 @@ namespace Noogen.Providers.GoogleWorkspace
             var scopeList = scopes.ToList();
 
             var hasKey = !string.IsNullOrWhiteSpace(_serviceAccountKeyPath) && File.Exists(_serviceAccountKeyPath);
-            var user = hasKey ? null : await _users.TryLoadAsync(account, scopeList, cancellationToken);
+            var user = hasKey || _users is null ? null : await _users.TryLoadAsync(account, scopeList, cancellationToken);
 
             switch (Choose(hasKey, user is not null, _allowApplicationDefault))
             {
@@ -87,7 +92,7 @@ namespace Noogen.Providers.GoogleWorkspace
                     {
                         Initializer = user!,
                         Source = CredentialSource.UserOAuth,
-                        Description = $"signed-in user '{account}' (token protected by {_users.Protector.Description})"
+                        Description = $"signed-in user '{account}' (token protected by {_users!.Protector.Description})"
                     };
 
                 case CredentialSource.ApplicationDefault:

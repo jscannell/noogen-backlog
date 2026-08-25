@@ -1,4 +1,4 @@
-using System.Globalization;
+using Noogen.Backlog.Verbs;
 
 namespace Noogen.Backlog.Cli
 {
@@ -175,17 +175,7 @@ namespace Noogen.Backlog.Cli
         public string RequirePositional(int index, string description) =>
             index < _positionals.Count ? _positionals[index] : throw new UsageException($"Expected {description}.");
 
-        public int? IntOption(string name)
-        {
-            var raw = Option(name);
-            if (raw is null)
-                return null;
-
-            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
-                throw new UsageException($"--{name} must be a whole number, got '{raw}'.");
-
-            return parsed;
-        }
+        public int? IntOption(string name) => OptionValue.WholeNumber(Option(name), "--" + name);
 
         /// <summary>
         /// The short flag or its spelled-out form. The abbreviations are what anyone scoring a
@@ -196,35 +186,8 @@ namespace Noogen.Backlog.Cli
             Has(name) || !Has(alias) ? IntOption(name) : IntOption(alias);
 
         /// <summary>Parses a duration like `90d`, `12w`, or a bare day count.</summary>
-        public DateTimeOffset? SinceOption(string name, DateTimeOffset now)
-        {
-            var raw = Option(name);
-            if (string.IsNullOrWhiteSpace(raw))
-                return null;
-
-            var trimmed = raw.Trim().ToLowerInvariant();
-            var multiplier = 1.0;
-
-            if (trimmed.EndsWith('d'))
-            {
-                trimmed = trimmed[..^1];
-            }
-            else if (trimmed.EndsWith('w'))
-            {
-                multiplier = 7;
-                trimmed = trimmed[..^1];
-            }
-            else if (trimmed.EndsWith('m'))
-            {
-                multiplier = 30;
-                trimmed = trimmed[..^1];
-            }
-
-            if (!double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var amount))
-                throw new UsageException($"--{name} must look like 90d, 12w, or 6m — got '{raw}'.");
-
-            return now.AddDays(-amount * multiplier);
-        }
+        public DateTimeOffset? SinceOption(string name, DateTimeOffset now) =>
+            OptionValue.Since(Option(name), now, "--" + name);
     }
 
 }

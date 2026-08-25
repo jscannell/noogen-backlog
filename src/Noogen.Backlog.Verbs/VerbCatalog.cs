@@ -87,6 +87,13 @@ namespace Noogen.Backlog.Verbs
         public string? Positional { get; init; }
 
         /// <summary>
+        /// Whether the verb refuses to run without it. False on <c>help</c>, which answers about
+        /// the whole surface when it is given nothing — and usage has to say so, because a reader
+        /// who cannot tell will not discover the cheaper question.
+        /// </summary>
+        public bool PositionalRequired { get; init; } = true;
+
+        /// <summary>
         /// The one word usage calls that argument. Named rather than cut out of the description,
         /// because "some text to search for" ends in the wrong word and `find &lt;for&gt;` is worse
         /// than no usage line at all.
@@ -121,20 +128,71 @@ namespace Noogen.Backlog.Verbs
         /// </summary>
         public IReadOnlyList<string> UsageParts(VerbSurface surface)
         {
+            if (surface == VerbSurface.Mcp)
+                return CallParts();
+
             var head = new StringBuilder(Name);
 
             if (Positional is not null)
-                head.Append(" <").Append(PositionalName).Append('>');
+            {
+                head.Append(PositionalRequired ? " <" : " [<")
+                    .Append(PositionalName)
+                    .Append(PositionalRequired ? ">" : ">]");
+            }
 
             var parts = new List<string> { head.ToString() };
+
+            var dash = VerbCatalog.OptionPrefix(surface);
 
             foreach (var option in OptionsOn(surface).OrderByDescending(option => option.Required))
             {
                 var value = option.TakesValue ? " <value>" : string.Empty;
 
                 parts.Add(option.Required
-                    ? $"--{option.Name}{value}"
-                    : $"[--{option.Name}{value}]");
+                    ? $"{dash}{option.Name}{value}"
+                    : $"[{dash}{option.Name}{value}]");
+            }
+
+            return parts;
+        }
+
+        /// <summary>
+        /// The call as the shape it actually is: `show {id, section?, full?}`.
+        ///
+        /// There is no argument position over MCP and no dash to prefix — every name is a key of
+        /// `options` — so the command line's rendering says two things that are not true there. Two
+        /// dashes teach a spelling this surface refuses, and bare names in a row read as positional
+        /// arguments: `block id reason` looks like three of them. Braces say "one object", and a
+        /// trailing `?` says the verb runs without that key.
+        ///
+        /// Deliberately not JSON Schema. This is the only description of what a verb takes — the
+        /// tool's own input schema stops at `verb` and a free-form `options` — so it is read on
+        /// demand by a model paying for it, and a schema would cost several times this to say the
+        /// same thing.
+        ///
+        /// One piece per key, because a piece is where a line may break: `new` takes ten.
+        /// </summary>
+        IReadOnlyList<string> CallParts()
+        {
+            var keys = new List<string>();
+
+            if (Positional is not null)
+                keys.Add(PositionalName + (PositionalRequired ? string.Empty : "?"));
+
+            foreach (var option in OptionsOn(VerbSurface.Mcp))
+                keys.Add(option.Name + (option.Required ? string.Empty : "?"));
+
+            // A verb that reads nothing is its own call. `whoami {}` would be inviting an argument.
+            if (keys.Count == 0)
+                return [Name];
+
+            var parts = new List<string> { Name };
+
+            for (var i = 0; i < keys.Count; i++)
+            {
+                parts.Add((i == 0 ? "{" : string.Empty)
+                    + keys[i]
+                    + (i == keys.Count - 1 ? "}" : ","));
             }
 
             return parts;
@@ -184,6 +242,7 @@ namespace Noogen.Backlog.Verbs
         const string Finishing = "FINISHING";
         const string Account = "ACCOUNT";
         const string Maintenance = "MAINTENANCE";
+        const string Learning = "LEARNING THE SURFACE";
 
         /// <summary>What every verb that acts on one ticket calls its positional argument.</summary>
         const string TicketId = "a ticket id";
@@ -259,8 +318,20 @@ namespace Noogen.Backlog.Verbs
 
             new VerbGroup(Finishing),
             new VerbGroup(Account),
-            new VerbGroup(Maintenance)
+            new VerbGroup(Maintenance),
+            new VerbGroup(Learning)
         ];
+
+        /// <summary>
+        /// The guidance a text-driven front end can hand back on demand — the skill's own files,
+        /// named as a caller asks for them.
+        ///
+        /// It is a list of topics rather than of file names because a topic is what somebody asks
+        /// for; which file carries it is the server's business. `overview` is the skill itself.
+        /// </summary>
+        public static IReadOnlyList<string> Guides { get; } = ["overview", "writing-style", "wsjf", "prose-input"];
+
+        static string GuideTopics => string.Join(", ", Guides);
 
         public static IReadOnlyList<VerbDefinition> All { get; } =
         [
@@ -397,7 +468,7 @@ namespace Noogen.Backlog.Verbs
                 Options = [new VerbOption("account", "Which stored account to sign out.")]
             },
 
-            new VerbDefinition("whoami", "Who you are and how you authenticated.")
+            new VerbDefinition("whoami", "Who the backlog is reached as, and whose name a write lands under.")
                 { Group = Account },
 
             new VerbDefinition("init", "One-time setup of the index and folders. Idempotent.")
@@ -429,8 +500,27 @@ namespace Noogen.Backlog.Verbs
                 { Group = Maintenance },
 
             new VerbDefinition("reindex", "Rebuild index rows from their documents.")
-                { Group = Maintenance }
+                { Group = Maintenance },
+
+            // Declared like anything else rather than special-cased in each front end, so that
+            // asking about the surface is itself part of the surface — and so that a verb or an
+            // option added below cannot be missing from the answer.
+            new VerbDefinition("help", "The verbs this surface offers, or one of them in detail.")
+            {
+                Group = Learning,
+                Positional = "a verb to explain; omit it for the whole surface",
+                PositionalName = "verb",
+                PositionalRequired = false,
+                Options =
+                [
+                    // Only where there is nothing to write it to: the CLI installs the same
+                    // guidance as a skill, and a caller reaching this server has no ~/.claude.
+                    new VerbOption("topic", "A guide to read whole: " + GuideTopics + ".")
+                        { Surfaces = VerbSurface.Mcp }
+                ]
+            }
         ];
+
 
         static readonly Dictionary<string, VerbDefinition> ByName =
             All.ToDictionary(verb => verb.Name, StringComparer.OrdinalIgnoreCase);
@@ -447,6 +537,14 @@ namespace Noogen.Backlog.Verbs
             ["new:status"] = LifecycleGuidance,
             ["new:phase"] = LifecycleGuidance
         };
+
+        /// <summary>
+        /// How a surface spells an option's name. A command line prefixes two dashes; a JSON object
+        /// has nothing to prefix, and showing dashes there would be teaching a spelling that is
+        /// refused. Said once, because usage and the option list are written in two places and a
+        /// caller reads them as one answer.
+        /// </summary>
+        public static string OptionPrefix(VerbSurface surface) => surface == VerbSurface.Cli ? "--" : string.Empty;
 
         public static VerbDefinition? Find(string verb) =>
             ByName.TryGetValue(verb, out var definition) ? definition : null;
