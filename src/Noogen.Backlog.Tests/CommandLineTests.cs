@@ -1,4 +1,5 @@
 using Noogen.Backlog.Cli;
+using Noogen.Backlog.Verbs;
 
 namespace Noogen.Backlog.Tests
 {
@@ -6,7 +7,7 @@ namespace Noogen.Backlog.Tests
     /// NG-0058: the parser used to decide whether `--name` took a value by looking at the argument
     /// after it. Nothing declared which of the two a name was meant to be, so every wrong guess
     /// failed quietly — the same class of defect as NG-0045, and the reason that one survived
-    /// eleven tickets. <see cref="Verbs"/> declares the shape now, and these pin what follows from
+    /// eleven tickets. <see cref="VerbCatalog"/> declares the shape now, and these pin what follows from
     /// declaring it.
     /// </summary>
     public class CommandLineTests
@@ -50,7 +51,7 @@ namespace Noogen.Backlog.Tests
 
         /// <summary>
         /// An undeclared name consumes nothing either, so the argument behind it survives for
-        /// <see cref="Verbs.Validate"/> to report. Both mistakes are then visible at once.
+        /// <see cref="CommandLineRules.Validate"/> to report. Both mistakes are then visible at once.
         /// </summary>
         [Fact]
         public void Parse_UndeclaredOption_DoesNotConsumeTheNextArgument()
@@ -176,7 +177,7 @@ namespace Noogen.Backlog.Tests
 
         /// <summary>
         /// An unknown verb declares nothing, so nothing consumes anything and the line survives
-        /// intact for <see cref="Verbs.Validate"/> to report as an unknown command.
+        /// intact for <see cref="CommandLineRules.Validate"/> to report as an unknown command.
         /// </summary>
         [Fact]
         public void Parse_UnknownVerb_ParsesWithoutRefusingTheOptions()

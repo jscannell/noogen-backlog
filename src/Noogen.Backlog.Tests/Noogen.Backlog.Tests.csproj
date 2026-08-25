@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Noogen.Backlog\Noogen.Backlog.csproj" />
+    <ProjectReference Include="..\Noogen.Backlog.Verbs\Noogen.Backlog.Verbs.csproj" />
     <ProjectReference Include="..\Noogen.Backlog.Cli\Noogen.Backlog.Cli.csproj" />
   </ItemGroup>
 

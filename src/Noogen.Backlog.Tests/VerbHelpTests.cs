@@ -1,3 +1,5 @@
+using Noogen.Backlog.Verbs;
+
 namespace Noogen.Backlog.Tests
 {
     /// <summary>

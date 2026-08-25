@@ -12,7 +12,7 @@ namespace Noogen.Backlog.Cli
     /// made it a valueless flag. Nothing said which of the two a name was meant to be, so every
     /// wrong guess failed silently — <c>--json</c> swallowed the argument after it and stopped
     /// being set, a value beginning with two dashes could not be passed, and an option typed with
-    /// its value missing became a flag nobody reads. <see cref="Verbs.TakesValue"/> answers from
+    /// its value missing became a flag nobody reads. <see cref="CommandLineRules.TakesValue"/> answers from
     /// the table instead, which makes all three decidable: a flag never consumes what follows it,
     /// an option with nothing to take is a usage error naming itself, and the argument after an
     /// option is its value even when it begins with two dashes.
@@ -38,7 +38,7 @@ namespace Noogen.Backlog.Cli
         public IReadOnlyList<string> Positionals => _positionals;
 
         /// <summary>
-        /// Every option and flag name given, in the order typed. <see cref="Verbs.Validate"/>
+        /// Every option and flag name given, in the order typed. <see cref="CommandLineRules.Validate"/>
         /// checks these against what the verb reads — nothing else can see a name that no command
         /// asks for. Order is kept so the error names the first mistake rather than an arbitrary
         /// one.
@@ -100,7 +100,7 @@ namespace Noogen.Backlog.Cli
                     // A flag given a value is the same silent no-op from the other direction:
                     // `--force=true` would land in _options, HasFlag would stay false, and the
                     // command would run without the thing that was asked for.
-                    if (Verbs.IsFlag(command.Verb, name))
+                    if (CommandLineRules.IsFlag(command.Verb, name))
                     {
                         throw new UsageException(
                             $"--{name} carries no value, so '{argument}' asks for something that does not exist. "
@@ -114,9 +114,9 @@ namespace Noogen.Backlog.Cli
                 command._names.Add(name);
 
                 // An undeclared name is left as a flag on purpose. It cannot be read anyway —
-                // Verbs.Validate is about to refuse it — and consuming the next argument would
+                // CommandLineRules.Validate is about to refuse it — and consuming the next argument would
                 // hide a positional that the error should be naming instead.
-                if (!Verbs.TakesValue(command.Verb, name))
+                if (!CommandLineRules.TakesValue(command.Verb, name))
                 {
                     command._flags.Add(name);
                     continue;
@@ -143,7 +143,7 @@ namespace Noogen.Backlog.Cli
             var name = argument[2..];
             var equals = name.IndexOf('=');
 
-            return Verbs.Accepts(verb, equals >= 0 ? name[..equals] : name);
+            return CommandLineRules.Accepts(verb, equals >= 0 ? name[..equals] : name);
         }
 
         /// <summary>

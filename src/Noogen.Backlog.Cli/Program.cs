@@ -1,3 +1,4 @@
+using Noogen.Backlog.Verbs;
 using Noogen.Providers.GoogleWorkspace;
 
 namespace Noogen.Backlog.Cli
@@ -60,8 +61,8 @@ namespace Noogen.Backlog.Cli
 
             // Before anything that costs a request or a sign-in: an option no verb reads used to
             // be ignored, so a typo — or a flag that only exists on another verb — still reported
-            // success. See Verbs.
-            Verbs.Validate(command);
+            // success. See CommandLineRules.
+            CommandLineRules.Validate(command);
 
             var config = LocalConfig.Load();
             var commands = new Commands(config);

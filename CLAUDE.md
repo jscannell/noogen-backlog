@@ -12,23 +12,35 @@ first — it covers the model, setup, and command surface.
 Flow: **front end → `BacklogApi` → `IBacklogStore` → `SheetIndex` / `TicketMover` → gateways →
 Drive + Sheets.** Solution: `src/Noogen.Backlog.slnx`.
 
-There is more than one front end, so everything a caller can *see* — the verbs, the options, the
-JSON shapes, the name of a failure, the help — lives in `Noogen.Backlog` and is emitted rather than
-written out per surface. A front end decides how a request arrives and how an answer is rendered.
-Nothing else.
+There is more than one front end, so everything a caller can *see* is emitted from one place
+rather than written out per surface. A front end decides how a request arrives and how an answer is
+rendered. Nothing else.
+
+That place is two assemblies, and the line between them is the shape of the front end. Everything a
+front end needs *whatever* shape it takes — the operations, the JSON shapes, the name of a failure —
+is in `Noogen.Backlog`. Everything only a **text-driven** front end needs — verb names, options,
+help — is in `Noogen.Backlog.Verbs`. A REST API is resource-shaped, so `POST /tickets/{id}/start` is
+built from `BacklogApi` and references the first and not the second. That reference graph is the
+check: anything the domain library turns out to need from the verb layer was misfiled.
 
 - **`Noogen.Providers.GoogleWorkspace`** — `GoogleCredentialResolver`, `UserCredentialStore`, the
   `Security/` token protection, and the Drive/Sheets gateways. The gateway interfaces are the test
   seam — everything above them runs against in-memory fakes. `A1` is the only place that builds
   range strings. No domain-wide delegation: shared drives take a service account as a direct member.
-- **`Noogen.Backlog`** — all logic, and the whole caller-visible surface. `BacklogApi` is one
+- **`Noogen.Backlog`** — all logic, and the contract every front end emits. `BacklogApi` is one
   method per verb over `IBacklogStore`, answering with the `IBacklogView` shapes `BacklogJson`
-  spells; `VerbCatalog` declares every verb and option, `VerbHelp` writes them out, and
-  `BacklogFault` names a failure. `EmbeddedSkill` carries the Claude Code skill. Referenced
-  directly by the future `BacklogToolset` in `Noogen.Agent`, which is why nothing here may depend
-  on a front end — no console, no config file, no transport.
+  spells; `BacklogFault` gives a failure one name, which each front end maps into its own
+  vocabulary — the CLI to an exit code, a server to a status. Referenced directly by the future
+  `BacklogToolset` in `Noogen.Agent`, which is why nothing here may depend on a front end or on the
+  verb layer: no console, no config file, no transport, no flags.
+- **`Noogen.Backlog.Verbs`** — the text-verb surface. `VerbCatalog` declares every verb and option
+  and which front ends offer it; `VerbHelp` writes them out; `EmbeddedSkill` carries the Claude
+  Code skill, which teaches these verbs. This is where command vocabulary is allowed to be command
+  vocabulary — options that take a value or do not, the `-file` spelling, positional arguments,
+  help wrapped to a terminal width.
 - **`Noogen.Backlog.Cli`** — thin shell. Arg parsing, table rendering, exit codes. No logic, and no
-  shapes of its own. Also what the build embeds the OAuth client *into*, which is why the nupkg is
+  shapes or verb names of its own; `CommandLineRules` only checks a parsed line against the
+  catalog. Also what the build embeds the OAuth client *into*, which is why the nupkg is
   the whole distribution. `scripts/deploy.ps1` packs it, replaces the global tool and installs the
   skill — that is the loop after a change.
 - **`Noogen.Backlog.Tests`** — xUnit over the fakes.
@@ -224,16 +236,23 @@ These are the things to be careful about; most of the design follows from them.
     what a contributor without the secret gets — so never make the embedding required.
 
 16. **The skill ships inside the binary, and `.claude/skills/backlog` is the only copy.** The
-    build embeds that directory into **`Noogen.Backlog`** as `skill/<relative path>` resources;
+    build embeds that directory into **`Noogen.Backlog.Verbs`** as `skill/<relative path>` resources;
     `backlog install-skill` writes them into `~/.claude/skills`. The skill teaches an agent these
     verbs, so a skill describing verbs the installed tool does not have is worse than no skill —
     one artifact means they cannot be half-updated. Never add a second copy to be "packaged": the
     directory the build reads is the same one this repo's own agents load, which is what keeps them
     from drifting.
 
-    It is embedded into the library rather than a front end because more than one front end serves
-    it — the CLI writes it to disk, and a server hands the same bytes to a caller with no skills
-    directory to write to. Embedding it twice would be the second copy this invariant forbids.
+    It is embedded into the verb layer rather than a front end because more than one front end
+    serves it — the CLI writes it to disk, and a server hands the same bytes to a caller with no
+    skills directory to write to. Embedding it twice would be the second copy this invariant
+    forbids. It sits with the verbs rather than in `Noogen.Backlog` because it teaches them; a
+    resource-shaped front end needs none of it.
+
+    Where it belongs is expected to move. The CLI is heading toward being human-facing and the MCP
+    server toward being the only agent-facing surface, and when `install-skill` goes with it the
+    skill has one server left to serve it. Move it then, not before — while two front ends serve
+    it, the shared layer is where it cannot be half-updated.
 
     Two consequences. MSBuild's `%(RecursiveDir)` emits the *build machine's* separator, so a
     resource is really named `skill/references\wsjf.md` on Windows — `EmbeddedSkill` splits on

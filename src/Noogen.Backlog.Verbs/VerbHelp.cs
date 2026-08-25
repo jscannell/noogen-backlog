@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Noogen.Backlog
+namespace Noogen.Backlog.Verbs
 {
     /// <summary>
     /// The surface, written out for whoever asked.

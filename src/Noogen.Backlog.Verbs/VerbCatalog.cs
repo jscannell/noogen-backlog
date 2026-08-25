@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Noogen.Backlog
+namespace Noogen.Backlog.Verbs
 {
     /// <summary>
     /// Which front ends offer a verb or an option.

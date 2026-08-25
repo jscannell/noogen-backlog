@@ -1,4 +1,5 @@
 using Noogen.Backlog.Cli;
+using Noogen.Backlog.Verbs;
 
 namespace Noogen.Backlog.Tests
 {
@@ -51,13 +52,13 @@ namespace Noogen.Backlog.Tests
         public void Validate_EveryVerbTheCatalogOffers_IsAcceptedOnACommandLine()
         {
             foreach (var verb in VerbCatalog.On(VerbSurface.Cli))
-                Verbs.Validate(CommandLine.Parse([verb.Name]));
+                CommandLineRules.Validate(CommandLine.Parse([verb.Name]));
         }
 
         [Fact]
         public void Validate_VerbTheCatalogDoesNotHave_IsRefused()
         {
-            var exception = Assert.Throws<UsageException>(() => Verbs.Validate(CommandLine.Parse(["frobnicate"])));
+            var exception = Assert.Throws<UsageException>(() => CommandLineRules.Validate(CommandLine.Parse(["frobnicate"])));
 
             Assert.Contains("frobnicate", exception.Message, StringComparison.Ordinal);
         }
@@ -75,8 +76,8 @@ namespace Noogen.Backlog.Tests
             {
                 foreach (var option in verb.Options.Where(option => option.IsProse))
                 {
-                    Assert.True(Verbs.Accepts(verb.Name, option.Name), $"'{verb.Name}' does not read --{option.Name}.");
-                    Assert.True(Verbs.Accepts(verb.Name, option.FileName), $"'{verb.Name}' does not read --{option.FileName}.");
+                    Assert.True(CommandLineRules.Accepts(verb.Name, option.Name), $"'{verb.Name}' does not read --{option.Name}.");
+                    Assert.True(CommandLineRules.Accepts(verb.Name, option.FileName), $"'{verb.Name}' does not read --{option.FileName}.");
                 }
             }
         }
@@ -87,7 +88,7 @@ namespace Noogen.Backlog.Tests
             foreach (var verb in VerbCatalog.All)
             {
                 foreach (var option in verb.Options.Where(option => option.Alias is not null))
-                    Assert.True(Verbs.Accepts(verb.Name, option.Alias!), $"'{verb.Name}' does not read --{option.Alias}.");
+                    Assert.True(CommandLineRules.Accepts(verb.Name, option.Alias!), $"'{verb.Name}' does not read --{option.Alias}.");
             }
         }
 

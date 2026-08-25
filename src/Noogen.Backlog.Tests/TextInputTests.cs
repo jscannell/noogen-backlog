@@ -5,7 +5,7 @@ namespace Noogen.Backlog.Tests
 {
     /// <summary>
     /// NG-0045: a description containing a double quote was torn apart by the shell and silently
-    /// truncated. <see cref="Verbs"/> makes the wreckage loud; these are the two input paths that
+    /// truncated. <see cref="CommandLineRules"/> makes the wreckage loud; these are the two input paths that
     /// avoid producing it, because a path and a pipe are each one argument no matter what is
     /// inside them.
     /// </summary>

@@ -2,6 +2,7 @@
   <Project Path="Noogen.Backlog.Cli/Noogen.Backlog.Cli.csproj" />
   <Project Path="Noogen.Backlog.Tests/Noogen.Backlog.Tests.csproj" />
   <Project Path="Noogen.Backlog/Noogen.Backlog.csproj" />
+  <Project Path="Noogen.Backlog.Verbs/Noogen.Backlog.Verbs.csproj" />
   <Project Path="Noogen.Providers.GoogleWorkspace/Noogen.Providers.GoogleWorkspace.csproj" />
   <Project Path="Noogen.Providers.GoogleWorkspace.Tests/Noogen.Providers.GoogleWorkspace.Tests.csproj" />
 </Solution>

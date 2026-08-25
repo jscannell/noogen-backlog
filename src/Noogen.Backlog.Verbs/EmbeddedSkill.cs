@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text;
 
-namespace Noogen.Backlog
+namespace Noogen.Backlog.Verbs
 {
     /// <summary>
     /// The Claude Code skill that teaches an agent to drive this CLI, carried inside the tool.

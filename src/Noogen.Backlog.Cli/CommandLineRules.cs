@@ -1,3 +1,5 @@
+using Noogen.Backlog.Verbs;
+
 namespace Noogen.Backlog.Cli
 {
     /// <summary>
@@ -12,7 +14,7 @@ namespace Noogen.Backlog.Cli
     /// torn into fragments arrived as extra positionals, was dropped, and the command exited 0 with
     /// a truncated ticket. <see cref="Validate"/> rejects the ones no verb reads.
     /// </summary>
-    public static class Verbs
+    public static class CommandLineRules
     {
         /// <summary>What <paramref name="verb"/>'s positional argument is, or null if it takes none.</summary>
         public static string? PositionalOf(string verb) => VerbCatalog.Find(verb)?.Positional;

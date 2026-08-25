@@ -9,7 +9,7 @@ namespace Noogen.Backlog.Cli
     /// <c>CommandLineToArgvW</c> rules. PowerShell quotes an argument containing whitespace but
     /// does not escape a double quote already inside it, so the embedded quote closes the quoted
     /// run early and the rest of the value is re-tokenised into separate arguments.
-    /// <see cref="Verbs"/> refuses those now instead of dropping them — but refusing is only half
+    /// <see cref="CommandLineRules"/> refuses those now instead of dropping them — but refusing is only half
     /// an answer, because the description still has to get in. A file path or a pipe is a single
     /// argument whatever it contains, so neither can be split.
     /// </summary>
@@ -81,7 +81,7 @@ namespace Noogen.Backlog.Cli
             if (!inline)
                 return null;
 
-            // No guard against a bare `--description` here any more: Verbs declares it as an
+            // No guard against a bare `--description` here any more: the catalog declares it as an
             // option that takes a value, so the parser refuses one without and this is only ever
             // reached with the value in hand.
             var value = command.RequireOption(name);

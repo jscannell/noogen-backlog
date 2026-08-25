@@ -1,5 +1,6 @@
 using System.Text;
 using Noogen.Backlog.Cli;
+using Noogen.Backlog.Verbs;
 
 namespace Noogen.Backlog.Tests
 {

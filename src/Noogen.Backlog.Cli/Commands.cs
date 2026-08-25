@@ -1,3 +1,4 @@
+using Noogen.Backlog.Verbs;
 using Noogen.Providers.GoogleWorkspace;
 
 namespace Noogen.Backlog.Cli

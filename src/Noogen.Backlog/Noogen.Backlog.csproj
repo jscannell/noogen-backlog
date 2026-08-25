@@ -4,28 +4,6 @@
     <ProjectReference Include="..\Noogen.Providers.GoogleWorkspace\Noogen.Providers.GoogleWorkspace.csproj" />
   </ItemGroup>
 
-  <!--
-    Bakes the Claude Code skill into the library, so `backlog install-skill` can write it into
-    ~/.claude/skills and the MCP server can serve the same bytes as resources to a caller that has
-    no skills directory. It rides here rather than in either front end because both need it, and a
-    second embedding would be the second copy invariant 16 exists to prevent.
-
-    The source of truth is the repository's own .claude/skills/backlog, not a copy: this is the
-    same skill the agents working *on* this repo load, so there is nothing to keep in sync.
-
-    LogicalName gives each file a name of `skill/<relative path>`. %(RecursiveDir) uses the build
-    machine's separator, which EmbeddedSkill normalises on the way back out.
-  -->
-  <PropertyGroup>
-    <BacklogSkillDirectory Condition="'$(BacklogSkillDirectory)' == ''">$(MSBuildThisFileDirectory)..\..\.claude\skills\backlog\</BacklogSkillDirectory>
-  </PropertyGroup>
-
-  <ItemGroup Condition="Exists('$(BacklogSkillDirectory)')">
-    <EmbeddedResource Include="$(BacklogSkillDirectory)**\*"
-                      LogicalName="skill/%(RecursiveDir)%(Filename)%(Extension)"
-                      Visible="false" />
-  </ItemGroup>
-
   <ItemGroup>
     <InternalsVisibleTo Include="Noogen.Backlog.Tests" />
   </ItemGroup>

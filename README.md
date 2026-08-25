@@ -655,7 +655,8 @@ its own column; if review later needs its own WIP limit, promoting it to a fourt
 | project | role |
 |---|---|
 | `Noogen.Providers.GoogleWorkspace` | Drive + Sheets client factories and gateways; ADC-chain auth |
-| `Noogen.Backlog` | all the logic — store, lifecycle, index, documents, metrics — and the whole caller-visible surface: `BacklogApi`, the JSON shapes, the verb catalog, the help, the embedded skill |
+| `Noogen.Backlog` | all the logic — store, lifecycle, index, documents, metrics — and the contract every front end emits: `BacklogApi`, the JSON shapes, the name of a failure |
+| `Noogen.Backlog.Verbs` | the text-verb surface: the verb and option catalog, the generated help, the embedded skill |
 | `Noogen.Backlog.Cli` | thin arg-parsing shell over `BacklogApi`, packaged as a global tool |
 | `Noogen.Backlog.Tests` | xUnit against in-memory Drive/Sheets fakes |
 | `Noogen.Providers.GoogleWorkspace.Tests` | xUnit over a stub HTTP transport, so gateway requests are asserted on the wire |
@@ -665,11 +666,18 @@ future consumer, and adding a `BacklogToolset` there should mean writing `[Agent
 over `BacklogApi`, not reimplementing any of this. Auth resolving through the ADC chain means
 the same code path serves a key file today and Workload Identity in GKE later.
 
-So is everything a caller can *see*. `BacklogApi` answers with `IBacklogView` shapes that
-`BacklogJson` spells; `VerbCatalog` declares every verb and option and `VerbHelp` writes them out;
-`BacklogFault` gives a failure one name, which each front end maps into its own vocabulary — the
-CLI to an exit code, a server to a status. A second front end adds a way in and a way to render,
-and nothing else. `--json` output is identical either way because there is only one copy of it.
+So is everything a caller can *see*, split by the shape a front end takes. `BacklogApi` answers
+with `IBacklogView` shapes that `BacklogJson` spells, and `BacklogFault` gives a failure one name
+each front end maps into its own vocabulary — the CLI to an exit code, a server to a status. Those
+are in `Noogen.Backlog`, because every front end needs them.
+
+`Noogen.Backlog.Verbs` holds what only a *text-driven* front end needs: the verb and option
+catalog, and the help generated from it. A REST API is resource-shaped — `POST /tickets/{id}/start`
+is built from `BacklogApi` and references the domain and not the verb layer. That reference graph
+is how the line stays honest, and `AssemblyBoundaryTests` asserts it.
+
+A second front end therefore adds a way in and a way to render, and nothing else. `--json` output is
+identical whichever one you reach, because there is only one copy of it.
 
 ## Development
 

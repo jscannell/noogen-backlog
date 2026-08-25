@@ -7,12 +7,12 @@ namespace Noogen.Backlog.Tests
     /// reads is silently dropped and the command still reports success. That is how
     /// `edit --description "..."` printed "Updated NG-12." without changing anything.
     /// </summary>
-    public class VerbsTests
+    public class CommandLineRulesTests
     {
         static UsageException Reject(params string[] args) =>
-            Assert.Throws<UsageException>(() => Verbs.Validate(CommandLine.Parse(args)));
+            Assert.Throws<UsageException>(() => CommandLineRules.Validate(CommandLine.Parse(args)));
 
-        static void Accept(params string[] args) => Verbs.Validate(CommandLine.Parse(args));
+        static void Accept(params string[] args) => CommandLineRules.Validate(CommandLine.Parse(args));
 
         [Fact]
         public void Validate_EditWithDescription_IsAccepted() =>
@@ -91,7 +91,7 @@ namespace Noogen.Backlog.Tests
         {
             // `whoami` deliberately reports the *configured* account, so --account there was a
             // silent no-op in the same way --description was.
-            Assert.Throws<UsageException>(() => Verbs.Validate(CommandLine.Parse(["whoami", "--account", "someone@noogen.ai"])));
+            Assert.Throws<UsageException>(() => CommandLineRules.Validate(CommandLine.Parse(["whoami", "--account", "someone@noogen.ai"])));
             Accept("login", "--account", "someone@noogen.ai");
         }
 
