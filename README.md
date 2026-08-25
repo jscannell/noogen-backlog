@@ -424,10 +424,18 @@ backlog restore <id>
 backlog init --drive <sharedDriveId> [--timezone America/New_York]
 backlog install-skill [--path DIR] [--force]    # the Claude Code skill, into ~/.claude/skills
 backlog doctor | backlog reindex
+
+backlog help                                    # every verb, grouped
+backlog help <verb>                             # one verb: usage, and what each option is for
 ```
 
 Every command accepts `--json`. That flag is the machine contract, and it is what makes the tool
 usable by agents: the skill teaches the CLI surface, not the storage layout.
+
+Both help texts are generated from `VerbCatalog`, the same table the parser checks a command line
+against. So the help cannot name a flag no verb reads, and cannot miss one that was added. Ask for
+one verb by name rather than reading all of it — that is the cheaper question, and it is the whole
+answer.
 
 ### Searching
 
@@ -647,15 +655,21 @@ its own column; if review later needs its own WIP limit, promoting it to a fourt
 | project | role |
 |---|---|
 | `Noogen.Providers.GoogleWorkspace` | Drive + Sheets client factories and gateways; ADC-chain auth |
-| `Noogen.Backlog` | all the logic — store, lifecycle, index, documents, metrics |
-| `Noogen.Backlog.Cli` | thin arg-parsing shell over `IBacklogStore`, packaged as a global tool |
+| `Noogen.Backlog` | all the logic — store, lifecycle, index, documents, metrics — and the whole caller-visible surface: `BacklogApi`, the JSON shapes, the verb catalog, the help, the embedded skill |
+| `Noogen.Backlog.Cli` | thin arg-parsing shell over `BacklogApi`, packaged as a global tool |
 | `Noogen.Backlog.Tests` | xUnit against in-memory Drive/Sheets fakes |
 | `Noogen.Providers.GoogleWorkspace.Tests` | xUnit over a stub HTTP transport, so gateway requests are asserted on the wire |
 
 The logic deliberately lives in a library rather than the CLI: the Noogen platform agent is a
 future consumer, and adding a `BacklogToolset` there should mean writing `[AgentTool]` wrappers
-over `IBacklogStore`, not reimplementing any of this. Auth resolving through the ADC chain means
+over `BacklogApi`, not reimplementing any of this. Auth resolving through the ADC chain means
 the same code path serves a key file today and Workload Identity in GKE later.
+
+So is everything a caller can *see*. `BacklogApi` answers with `IBacklogView` shapes that
+`BacklogJson` spells; `VerbCatalog` declares every verb and option and `VerbHelp` writes them out;
+`BacklogFault` gives a failure one name, which each front end maps into its own vocabulary — the
+CLI to an exit code, a server to a status. A second front end adds a way in and a way to render,
+and nothing else. `--json` output is identical either way because there is only one copy of it.
 
 ## Development
 

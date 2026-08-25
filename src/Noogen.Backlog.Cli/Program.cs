@@ -6,10 +6,10 @@ namespace Noogen.Backlog.Cli
     {
         public static async Task<int> Main(string[] args)
         {
-            // Parsing is inside the try because it can now refuse the line itself — an option
-            // declared to take a value and given none is a usage error rather than a flag nothing
-            // reads. That leaves no CommandLine to ask about --json, which is why Fail also gets
-            // the raw arguments.
+            // Parsing is inside the try because it can refuse the line itself — an option declared
+            // to take a value and given none is a usage error rather than a flag nothing reads.
+            // That leaves no CommandLine to ask about --json, which is why Fail also gets the raw
+            // arguments.
             CommandLine? command = null;
 
             try
@@ -17,72 +17,44 @@ namespace Noogen.Backlog.Cli
                 command = CommandLine.Parse(args);
                 return await RunAsync(command);
             }
-            catch (UsageException exception)
-            {
-                Fail(command, args, "usage", exception.Message);
-                return 2;
-            }
-            catch (WipLimitExceededException exception)
-            {
-                Fail(command, args, "wip-limit", exception.Message);
-                return 1;
-            }
-            catch (BacklogTransitionException exception)
-            {
-                Fail(command, args, "illegal-transition", exception.Message);
-                return 1;
-            }
-            catch (KeyNotFoundException exception)
-            {
-                Fail(command, args, "not-found", exception.Message);
-                return 1;
-            }
-            catch (NotSignedInException exception)
-            {
-                Fail(command, args, "not-signed-in", exception.Message);
-                return 3;
-            }
-            catch (OAuthClientNotConfiguredException exception)
-            {
-                Fail(command, args, "oauth-client-missing", exception.Message);
-                return 3;
-            }
-            catch (OAuthClientInvalidException exception)
-            {
-                Fail(command, args, "oauth-client-invalid", exception.Message);
-                return 3;
-            }
-            catch (Exception exception) when (GoogleRateLimit.IsRateLimited(exception))
-            {
-                Fail(command, args, "rate-limited",
-                    "Google is rate limiting requests to this backlog, and the command kept being refused after " +
-                    "several waits. Nothing was half-written — a rate-limited request is rejected, not applied. " +
-                    "Wait a minute and run it again; if it persists, someone may be running a large 'reindex' or " +
-                    "'doctor' against the same backlog.");
-                return 4;
-            }
-            catch (ArgumentException exception)
-            {
-                Fail(command, args, "invalid-argument", exception.Message);
-                return 1;
-            }
-            catch (FormatException exception)
-            {
-                Fail(command, args, "malformed", exception.Message);
-                return 1;
-            }
             catch (Exception exception)
             {
-                Fail(command, args, "error", exception.Message);
-                return 1;
+                var kind = BacklogFault.KindOf(exception);
+                Fail(command, args, kind, BacklogFault.MessageOf(exception));
+
+                return ExitCodeFor(kind);
             }
         }
 
+        /// <summary>
+        /// What a failure costs the caller's shell. The kind is the shared contract — the MCP
+        /// server reports the same one — but an exit code is a thing only a process has, so the
+        /// mapping lives here rather than beside <see cref="BacklogFault"/>.
+        ///
+        /// 2 is a command line nobody could have run. 3 is "you are not set up". 4 is Google
+        /// pushing back, which is worth telling apart from a real failure because nothing was
+        /// written and retrying later works. Everything else is 1.
+        /// </summary>
+        static int ExitCodeFor(string kind) => kind switch
+        {
+            BacklogFault.Usage => 2,
+            BacklogFault.NotSignedIn => 3,
+            BacklogFault.OAuthClientMissing => 3,
+            BacklogFault.OAuthClientInvalid => 3,
+            BacklogFault.RateLimited => 4,
+            _ => 1
+        };
+
         static async Task<int> RunAsync(CommandLine command)
         {
+            // `help <verb>` answers about one verb rather than the whole surface. Reading all of it
+            // to learn one thing is what makes a self-describing tool expensive.
             if (command.Verb is "help" or "h" or "?")
             {
-                WriteHelp();
+                Output.WriteLine(command.Positionals.Count > 0
+                    ? VerbHelp.Write(command.Positionals[0])
+                    : VerbHelp.Write());
+
                 return 0;
             }
 
@@ -180,6 +152,9 @@ namespace Noogen.Backlog.Cli
                 config.RequireSpreadsheetId());
         }
 
+        internal static async Task<BacklogApi> CreateApiAsync(LocalConfig config) =>
+            new(await CreateStoreAsync(config));
+
         static void Fail(CommandLine? command, string[] args, string kind, string message)
         {
             if (command?.Json ?? CommandLine.WantsJson(args))
@@ -194,86 +169,6 @@ namespace Noogen.Backlog.Cli
             {
                 Output.WriteError($"error ({kind}): {message}");
             }
-        }
-
-        static void WriteHelp()
-        {
-            Output.WriteLine("""
-                backlog — a WSJF-prioritized Kanban backlog stored in Google Drive.
-
-                Work moves Backlog -> In Progress -> Archive. The tab a ticket lives on is its
-                state, so the verbs below are the transitions; there is no free-form status flag.
-                Only unstarted work is WSJF-ranked.
-
-                QUEUE
-                  list [--area A] [--owner O] [--top N]   Unstarted work in rank order
-                  next [--owner me]                       Highest-ranked item(s)
-                  find "<text>" [--top N]                 Search every tab, names and prose
-                  show <id> [--section S] [--full]        One ticket, with its body
-                  flow [--since 90d]                      Throughput and cycle-time p50/p85
-
-                  show trims the Activity Log to the last few entries; --full prints all of
-                  them, and --section description (or acceptance-criteria, notes, activity-log)
-                  prints just that one — which is what you want before rewriting it.
-
-                  find is the check to run before filing something. It reads two sources and
-                  says which one hit: names — id, title, area, owner — come from the index and
-                  match on any fragment, while document prose comes from Drive's full-text
-                  index, which matches whole words only, covers the whole document including
-                  the Activity Log, and may not yet know about a document written minutes ago.
-
-                WORK IN FLIGHT
-                  wip [--owner O]                         In Progress, oldest first, with aging
-                  start <id> [--owner me] [--force]       Pull an item (respects the WIP limit)
-                  block <id> --reason "..."               Mark blocked
-                  unblock <id>                            Back to in-progress
-                  review <id>                             Complete, awaiting test/review
-
-                CAPTURE AND EDIT
-                  new --title "..." [--type feature] [--area A] [--owner O]
-                      [--bv N --tc N --rroe N --size N]
-                      [--description "..."] [--acceptance-criteria "..."]
-                  edit <id> [--title ...] [--area ...] [--owner ...] [--type ...]
-                       [--description "..."]             Replaces the Description section
-                       [--acceptance-criteria "..."]     Replaces the Acceptance Criteria section
-                       [--note "..."]                    Also log why, in the same write
-
-                  Those two sections are the only prose the tool writes, and a ticket filed
-                  without them says *TODO* until somebody fills them in — write the criteria as
-                  a `- [ ] ...` checklist. Prose given inline goes through the shell, which on
-                  Windows splits the value at an embedded double quote, so for anything longer
-                  than a line use either of:
-                    --description-file body.md           Read the section from a file
-                    --description -                      Read it from standard input
-                  Both spellings exist for --acceptance-criteria too, and only one option per
-                  command may read standard input.
-                  e.g.  Get-Content body.md -Raw | backlog new --title "..." --description -
-                  score <id> [--bv N] [--tc N] [--rroe N] [--size N]
-                  note <id> --text "..."                  Append to the Activity Log
-
-                FINISHING
-                  archive <id> --as done|cancelled|duplicate [--note "..."]
-                  restore <id>                            Archive -> Backlog
-
-                ACCOUNT
-                  login [--account name]                  Sign in with your own Google account
-                  logout [--account name]                 Revoke and delete the local token
-                  whoami                                  Who you are and how you authenticated
-
-                MAINTENANCE
-                  init --drive <id> [--timezone America/New_York]   One-time setup (idempotent)
-                  install-skill [--path DIR] [--force]    Write the Claude Code skill this tool
-                                                          carries into ~/.claude/skills
-                  doctor                                  Check the index for drift and duplicates
-                  reindex                                 Rebuild rows from their documents
-
-                Every command accepts --json for machine-readable output, which is always UTC.
-                On list, next, wip and find, --fields id,wsjf,title narrows it to the columns
-                you asked for. Human output uses the backlog's configured timezone; --utc shows UTC.
-                WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20. The score flags are
-                also spelled out: --business-value, --time-criticality, --risk-opportunity,
-                --job-size.
-                """);
         }
     }
 }

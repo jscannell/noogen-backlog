@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text;
 
-namespace Noogen.Backlog.Cli
+namespace Noogen.Backlog
 {
     /// <summary>
     /// The Claude Code skill that teaches an agent to drive this CLI, carried inside the tool.
@@ -14,6 +14,11 @@ namespace Noogen.Backlog.Cli
     /// The source of truth stays `.claude/skills/backlog` in the repository, which is also the
     /// copy this repository's own agents load. The build embeds that directory rather than a
     /// second copy, so there is nothing to keep in sync.
+    ///
+    /// It is embedded into this assembly rather than into a front end because more than one front
+    /// end serves it: the CLI writes it to disk with `install-skill`, and the MCP server hands the
+    /// same bytes to a caller with no skills directory to write to. Two embeddings would be a
+    /// second copy again.
     /// </summary>
     public static class EmbeddedSkill
     {

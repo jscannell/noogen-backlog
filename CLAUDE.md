@@ -9,25 +9,34 @@ first — it covers the model, setup, and command surface.
 
 ## Architecture
 
-Flow: **CLI verb → `IBacklogStore` → `SheetIndex` / `TicketMover` → gateways → Drive + Sheets.**
-Solution: `src/Noogen.Backlog.slnx`.
+Flow: **front end → `BacklogApi` → `IBacklogStore` → `SheetIndex` / `TicketMover` → gateways →
+Drive + Sheets.** Solution: `src/Noogen.Backlog.slnx`.
+
+There is more than one front end, so everything a caller can *see* — the verbs, the options, the
+JSON shapes, the name of a failure, the help — lives in `Noogen.Backlog` and is emitted rather than
+written out per surface. A front end decides how a request arrives and how an answer is rendered.
+Nothing else.
 
 - **`Noogen.Providers.GoogleWorkspace`** — `GoogleCredentialResolver`, `UserCredentialStore`, the
   `Security/` token protection, and the Drive/Sheets gateways. The gateway interfaces are the test
   seam — everything above them runs against in-memory fakes. `A1` is the only place that builds
   range strings. No domain-wide delegation: shared drives take a service account as a direct member.
-- **`Noogen.Backlog`** — all logic. Referenced directly by the future `BacklogToolset` in
-  `Noogen.Agent`, which is why nothing here may depend on the CLI.
-- **`Noogen.Backlog.Cli`** — thin shell. Arg parsing, output formatting, exit codes. No logic.
-  Also what the build embeds things *into*: the OAuth client and the Claude Code skill, which is
-  why the nupkg is the whole distribution. `scripts/deploy.ps1` packs it, replaces the global tool
-  and installs the skill — that is the loop after a change.
+- **`Noogen.Backlog`** — all logic, and the whole caller-visible surface. `BacklogApi` is one
+  method per verb over `IBacklogStore`, answering with the `IBacklogView` shapes `BacklogJson`
+  spells; `VerbCatalog` declares every verb and option, `VerbHelp` writes them out, and
+  `BacklogFault` names a failure. `EmbeddedSkill` carries the Claude Code skill. Referenced
+  directly by the future `BacklogToolset` in `Noogen.Agent`, which is why nothing here may depend
+  on a front end — no console, no config file, no transport.
+- **`Noogen.Backlog.Cli`** — thin shell. Arg parsing, table rendering, exit codes. No logic, and no
+  shapes of its own. Also what the build embeds the OAuth client *into*, which is why the nupkg is
+  the whole distribution. `scripts/deploy.ps1` packs it, replaces the global tool and installs the
+  skill — that is the loop after a change.
 - **`Noogen.Backlog.Tests`** — xUnit over the fakes.
 - **`Noogen.Providers.GoogleWorkspace.Tests`** — xUnit over a stub HTTP transport. The gateways are
   translators from our vocabulary into Google's REST shapes, so what they put on the wire *is* the
   behavior; `StubHttpClientFactory` swaps the handler and leaves the rest of Google's pipeline
   intact. Auth, token protection and the OAuth client live here too — everything except the
-  build-time embedding, which can only be asserted against the CLI assembly that carries it.
+  build-time OAuth embedding, which can only be asserted against the CLI assembly that carries it.
 
 ## The invariants
 
@@ -178,8 +187,10 @@ These are the things to be careful about; most of the design follows from them.
    **`TrimActivityLog` is display only, and must never reach a write.** `show` calls it to drop
    all but the last few log entries; the log is the only prose record of a ticket's life, so a
    trimmed body sent to `UpdateDocAsync` would delete history nothing else holds — the
-   unrecoverable failure this invariant exists to prevent. It is called from the `show` command and
-   nowhere else, and adding a second caller means proving that caller never writes.
+   unrecoverable failure this invariant exists to prevent. It is called from `BacklogApi.Narrow`,
+   on the read path behind `show`, and nowhere else — every front end that shows a ticket goes
+   through that one method rather than trimming for itself. Adding a second caller means proving
+   that caller never writes.
 
    Everything else about the body stays hands-off. In particular this is not license to
    "normalize" prose — see invariant 18. Blanking either section is refused rather than treated as
@@ -213,11 +224,16 @@ These are the things to be careful about; most of the design follows from them.
     what a contributor without the secret gets — so never make the embedding required.
 
 16. **The skill ships inside the binary, and `.claude/skills/backlog` is the only copy.** The
-    build embeds that directory as `skill/<relative path>` resources; `backlog install-skill`
-    writes them into `~/.claude/skills`. The skill teaches an agent this CLI's verbs, so a skill
-    describing verbs the installed tool does not have is worse than no skill — one artifact means
-    they cannot be half-updated. Never add a second copy to be "packaged": the directory the build
-    reads is the same one this repo's own agents load, which is what keeps them from drifting.
+    build embeds that directory into **`Noogen.Backlog`** as `skill/<relative path>` resources;
+    `backlog install-skill` writes them into `~/.claude/skills`. The skill teaches an agent these
+    verbs, so a skill describing verbs the installed tool does not have is worse than no skill —
+    one artifact means they cannot be half-updated. Never add a second copy to be "packaged": the
+    directory the build reads is the same one this repo's own agents load, which is what keeps them
+    from drifting.
+
+    It is embedded into the library rather than a front end because more than one front end serves
+    it — the CLI writes it to disk, and a server hands the same bytes to a caller with no skills
+    directory to write to. Embedding it twice would be the second copy this invariant forbids.
 
     Two consequences. MSBuild's `%(RecursiveDir)` emits the *build machine's* separator, so a
     resource is really named `skill/references\wsjf.md` on Windows — `EmbeddedSkill` splits on
@@ -330,9 +346,17 @@ These are the things to be careful about; most of the design follows from them.
   never part of what the shapes promise. Narrowing is the caller's to ask for: `--fields` on the
   list-shaped verbs, `--section` on `show`. Both are projections, so they must not invent a key —
   a field a ticket does not carry stays absent rather than becoming null.
-- Every verb declares the options it reads in `Verbs`, and an undeclared option is a usage error.
-  The parser collects any `--name`, so a flag nothing reads is invisible: the command runs, does
-  nothing, and reports success. Adding a flag to a command means adding it to that table too.
+- Every verb declares the options it reads in `VerbCatalog`, and an undeclared option is a usage
+  error. The parser collects any `--name`, so a flag nothing reads is invisible: the command runs,
+  does nothing, and reports success. Adding a flag to a command means adding it to that table too.
+
+  The table now carries a description for every verb and every option, and a `VerbSurface` saying
+  which front ends offer it. `VerbHelp` is written from it, so a help text cannot name a flag no
+  verb reads or miss one that was added — the same promise the table makes to the parser, extended
+  to the reader. That matters more than it did: over MCP the help *is* how a caller learns the
+  surface, so an omission there is not cosmetic, it is a verb nobody can find. Never write usage
+  out by hand beside the table.
+
   The same table caps positionals — a ticket id or nothing — because an argument past that is
   almost always a value PowerShell split at an unescaped double quote, and dropping it silently
   truncated the ticket. Every prose option therefore has two paths that never reach the command
@@ -360,6 +384,11 @@ These are the things to be careful about; most of the design follows from them.
   is quoted as it is spelled; only prose is converted.
 
 ## Testing
+
+`TestBacklog.Api` is the seam both front ends sit on, over the same fakes and the same clock —
+tests that care what an *answer* is use it; tests that care what reaches the Sheet use
+`TestBacklog.Store`. `BacklogApiTests` pins the composed verbs and the exact keys each answer
+carries, because "both front ends answer" is not the same promise as "both answer the same way".
 
 `TestBacklog.CreateAsync()` builds an initialized backlog over `FakeSheetsGateway` /
 `FakeDriveGateway`. The fakes store raw cell content, so tests can assert formula-vs-frozen-value

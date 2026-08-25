@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Noogen.Backlog.Cli;
 
 namespace Noogen.Backlog.Tests
 {
@@ -9,7 +8,7 @@ namespace Noogen.Backlog.Tests
     /// ask for less. Both must leave the *shapes* exactly as they were — same names, same values,
     /// and absent still meaning absent.
     /// </summary>
-    public class OutputJsonTests
+    public class BacklogJsonTests
     {
         static Ticket Sample() => new()
         {
@@ -32,7 +31,7 @@ namespace Noogen.Backlog.Tests
             try
             {
                 Console.SetOut(writer);
-                Output.WriteJson(payload);
+                Console.Out.Write(BacklogJson.Serialize(payload));
             }
             finally
             {
@@ -106,7 +105,7 @@ namespace Noogen.Backlog.Tests
         {
             var view = TicketView.From(new TicketMatch { Ticket = Sample(), InBody = true });
 
-            using var document = JsonDocument.Parse(Output.Project(view, Output.ParseFields("id,match")).ToJsonString());
+            using var document = JsonDocument.Parse(view.ToNode(BacklogJson.ParseFields("id,match")).ToJsonString());
 
             Assert.Equal(
                 ["id", "match"],
@@ -118,16 +117,16 @@ namespace Noogen.Backlog.Tests
         [Fact]
         public void ParseFields_NoValue_ReturnsNullMeaningEverything()
         {
-            Assert.Null(Output.ParseFields(null));
-            Assert.Null(Output.ParseFields("  "));
+            Assert.Null(BacklogJson.ParseFields(null));
+            Assert.Null(BacklogJson.ParseFields("  "));
         }
 
         [Fact]
         public void Project_FieldsAreNamed_KeepsOnlyThose()
         {
-            var fields = Output.ParseFields("id,wsjf,title");
+            var fields = BacklogJson.ParseFields("id,wsjf,title");
 
-            var json = Output.Project(TicketView.From(Sample()), fields).ToJsonString();
+            var json = TicketView.From(Sample()).ToNode(fields).ToJsonString();
 
             using var document = JsonDocument.Parse(json);
 
@@ -142,7 +141,7 @@ namespace Noogen.Backlog.Tests
             var ticket = Sample();
             ticket.DocUrl = "https://docs.google.com/document/d/abc/edit";
 
-            using var document = JsonDocument.Parse(Output.Project(TicketView.From(ticket), null).ToJsonString());
+            using var document = JsonDocument.Parse(TicketView.From(ticket).ToNode(null).ToJsonString());
 
             var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToList();
 
@@ -156,8 +155,8 @@ namespace Noogen.Backlog.Tests
         {
             var view = TicketView.From(Sample());
 
-            using var projected = JsonDocument.Parse(Output.Project(view, Output.ParseFields("id,bv")).ToJsonString());
-            using var whole = JsonDocument.Parse(Output.Project(view, null).ToJsonString());
+            using var projected = JsonDocument.Parse(view.ToNode(BacklogJson.ParseFields("id,bv")).ToJsonString());
+            using var whole = JsonDocument.Parse(view.ToNode(null).ToJsonString());
 
             Assert.Equal(whole.RootElement.GetProperty("id").GetString(), projected.RootElement.GetProperty("id").GetString());
             Assert.Equal(whole.RootElement.GetProperty("bv").GetInt32(), projected.RootElement.GetProperty("bv").GetInt32());
@@ -170,7 +169,7 @@ namespace Noogen.Backlog.Tests
         [Fact]
         public void Project_FieldIsAbsentOnThisTicket_StaysAbsentRatherThanBecomingNull()
         {
-            var json = Output.Project(TicketView.From(Sample()), Output.ParseFields("id,startedAt")).ToJsonString();
+            var json = TicketView.From(Sample()).ToNode(BacklogJson.ParseFields("id,startedAt")).ToJsonString();
 
             using var document = JsonDocument.Parse(json);
 
@@ -181,7 +180,7 @@ namespace Noogen.Backlog.Tests
         [Fact]
         public void ParseFields_NameIsMisspelled_RefusesAndListsTheRealOnes()
         {
-            var exception = Assert.Throws<UsageException>(() => Output.ParseFields("id,wsfj"));
+            var exception = Assert.Throws<UsageException>(() => BacklogJson.ParseFields("id,wsfj"));
 
             Assert.Contains("'wsfj'", exception.Message, StringComparison.Ordinal);
             Assert.Contains("wsjf", exception.Message, StringComparison.Ordinal);
@@ -191,7 +190,7 @@ namespace Noogen.Backlog.Tests
         [Fact]
         public void ParseFields_NameDiffersInCase_IsAccepted()
         {
-            var json = Output.Project(TicketView.From(Sample()), Output.ParseFields("ID,Title")).ToJsonString();
+            var json = TicketView.From(Sample()).ToNode(BacklogJson.ParseFields("ID,Title")).ToJsonString();
 
             Assert.Contains("\"id\":", json, StringComparison.Ordinal);
             Assert.Contains("\"title\":", json, StringComparison.Ordinal);
@@ -200,7 +199,7 @@ namespace Noogen.Backlog.Tests
         [Fact]
         public void ParseFields_ValueHasSpacesAndATrailingComma_ReadsThemAnyway()
         {
-            var json = Output.Project(TicketView.From(Sample()), Output.ParseFields(" id , title , ")).ToJsonString();
+            var json = TicketView.From(Sample()).ToNode(BacklogJson.ParseFields(" id , title , ")).ToJsonString();
 
             using var document = JsonDocument.Parse(json);
 

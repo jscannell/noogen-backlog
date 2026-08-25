@@ -43,11 +43,16 @@ backlog archive <id> --as done|cancelled|duplicate [--note "..."]
 backlog restore <id>                            # Archive -> Backlog
 
 backlog doctor | backlog reindex                # health check / repair
+backlog help [<verb>]                           # the surface, or one verb's options
 ```
 
 Every prose option — `description`, `acceptance-criteria`, `note`, `text`, `reason` — takes three
 spellings: `--<name> "..."`, `--<name>-file <path>`, and `--<name> -` for a pipe. Prefer the file;
 see "Giving prose to the CLI" below.
+
+`backlog help <verb>` prints that verb's options and what each is for. It is generated from the
+same table the parser checks against, so it is never out of date — reach for it rather than
+guessing at a flag, and ask about one verb rather than reading the whole surface.
 
 ## Read cheaply
 

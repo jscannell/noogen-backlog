@@ -45,6 +45,13 @@ namespace Noogen.Backlog.Tests
             return backlog;
         }
 
+        /// <summary>
+        /// The seam both front ends sit on, over the same fakes and the same clock. Tests that
+        /// care what an *answer* is use this; tests that care what reaches the Sheet use
+        /// <see cref="Store"/>.
+        /// </summary>
+        public BacklogApi Api => new(Store, () => Clock.Now);
+
         public TimeZoneInfo Zone => SheetTime.ResolveZone(Sheets.TimeZoneId);
 
         /// <summary>Writes the policy to the Config tab rather than poking the store, so the

@@ -2,6 +2,13 @@ using Noogen.Providers.GoogleWorkspace;
 
 namespace Noogen.Backlog.Cli
 {
+    /// <summary>
+    /// The terminal half of the tool: read a command line, ask <see cref="BacklogApi"/>, render.
+    ///
+    /// Nothing here decides what an answer *is*. A verb that composes more than one store call, or
+    /// that has to report something beside its result, does that in the API, because the MCP server
+    /// answers the same questions and the two would otherwise drift.
+    /// </summary>
     public class Commands
     {
         readonly LocalConfig _config;
@@ -11,26 +18,39 @@ namespace Noogen.Backlog.Cli
             _config = config;
         }
 
-        Task<IBacklogStore> StoreAsync() => Program.CreateStoreAsync(_config);
-
-        static DateTimeOffset Now => DateTimeOffset.UtcNow;
+        Task<BacklogApi> ApiAsync() => Program.CreateApiAsync(_config);
 
         /// <summary>
         /// Human output renders in the backlog's configured timezone; --utc opts out. JSON is
-        /// deliberately never localised — it is the machine contract the skill and the future
-        /// agent toolset parse, and a moving representation there would be a trap.
+        /// deliberately never localised — it is the machine contract the skill, the MCP server and
+        /// the future agent toolset parse, and a moving representation there would be a trap.
         /// </summary>
-        static async Task<TimeZoneInfo> ZoneAsync(CommandLine command, IBacklogStore store)
+        static async Task<TimeZoneInfo> ZoneAsync(CommandLine command, BacklogApi api)
         {
             if (command.HasFlag("utc"))
                 return TimeZoneInfo.Utc;
 
-            var settings = await store.GetSettingsAsync();
+            var settings = await api.SettingsAsync();
             return settings.Zone;
         }
 
-        static string When(DateTimeOffset? instant, TimeZoneInfo zone) =>
-            instant.HasValue && instant.Value != default ? SheetTime.FormatWithZone(instant.Value, zone) : "-";
+        /// <summary>
+        /// Renders one of the machine contract's UTC timestamps for a person.
+        ///
+        /// The view carries text rather than an instant because text is what goes on the wire, and
+        /// one shape is worth a parse here: a second representation held alongside it would be a
+        /// second thing to keep true. An unset timestamp reads as "-" rather than year one.
+        /// </summary>
+        static string When(string? iso, TimeZoneInfo zone)
+        {
+            if (string.IsNullOrEmpty(iso))
+                return "-";
+
+            var instant = Iso.Parse(iso, "timestamp");
+            return instant == default ? "-" : SheetTime.FormatWithZone(instant, zone);
+        }
+
+        static IReadOnlySet<string>? Fields(CommandLine command) => BacklogJson.ParseFields(command.Option("fields"));
 
         // --- account ---
 
@@ -290,133 +310,104 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ListAsync(CommandLine command)
         {
-            var store = await StoreAsync();
-            var tickets = await store.ListAsync(BuildFilter(command));
+            var api = await ApiAsync();
+            var queue = await api.ListAsync(BuildFilter(command));
 
             if (command.Json)
             {
-                var fields = Output.ParseFields(command.Option("fields"));
-                Output.WriteJson(tickets.Select(ticket => Output.Project(TicketView.From(ticket), fields)).ToList());
+                Output.WriteJson(queue, Fields(command));
                 return 0;
             }
 
+            WriteQueue(queue);
+            return 0;
+        }
+
+        static void WriteQueue(TicketListView queue) =>
             Output.WriteTable(
                 ["rank", "id", "wsjf", "type", "area", "owner", "title"],
-                tickets.Select((ticket, index) => (IReadOnlyList<string>)
+                queue.Tickets.Select((ticket, index) => (IReadOnlyList<string>)
                 [
-                    ticket.Rank.HasValue ? ticket.Rank.Value.ToString() : (ticket.Score.Value.HasValue ? (index + 1).ToString() : "-"),
+                    ticket.Rank.HasValue ? ticket.Rank.Value.ToString() : (ticket.Wsjf.HasValue ? (index + 1).ToString() : "-"),
                     ticket.Id,
-                    Output.Number(ticket.Score.Value),
-                    Vocabulary.ToWire(ticket.Type),
+                    Output.Number(ticket.Wsjf),
+                    ticket.Type,
                     Output.Text(ticket.Area),
                     Output.Text(ticket.Owner),
                     ticket.Title
                 ]).ToList());
 
-            return 0;
-        }
-
         public async Task<int> NextAsync(CommandLine command)
         {
-            var store = await StoreAsync();
-            var filter = BuildFilter(command);
-            filter.Top ??= 1;
-
-            var tickets = await store.ListAsync(filter);
+            var api = await ApiAsync();
+            var queue = await api.NextAsync(BuildFilter(command));
 
             if (command.Json)
             {
-                var fields = Output.ParseFields(command.Option("fields"));
-                Output.WriteJson(tickets.Select(ticket => Output.Project(TicketView.From(ticket), fields)).ToList());
+                Output.WriteJson(queue, Fields(command));
                 return 0;
             }
 
-            if (tickets.Count == 0)
+            if (queue.Tickets.Count == 0)
             {
                 Output.WriteLine("The queue is empty.");
                 return 0;
             }
 
-            foreach (var ticket in tickets)
-                Output.WriteLine($"{ticket.Id}  wsjf {Output.Number(ticket.Score.Value)}  {ticket.Title}");
+            foreach (var ticket in queue.Tickets)
+                Output.WriteLine($"{ticket.Id}  wsjf {Output.Number(ticket.Wsjf)}  {ticket.Title}");
 
             return 0;
         }
 
         public async Task<int> WipAsync(CommandLine command)
         {
-            var store = await StoreAsync();
-            var now = Now;
-
-            var tickets = await store.WipAsync(BuildFilter(command));
-            var flow = await store.FlowAsync(null);
-            var settings = await store.GetSettingsAsync();
-            var threshold = flow.CycleTimeP85;
+            var api = await ApiAsync();
+            var wip = await api.WipAsync(BuildFilter(command));
 
             if (command.Json)
             {
-                var fields = Output.ParseFields(command.Option("fields"));
-
-                Output.WriteJson(new Dictionary<string, object>
-                {
-                    ["wipLimit"] = settings.WipLimit,
-                    ["inFlight"] = tickets.Count,
-                    ["agingThresholdDays"] = threshold ?? 0,
-                    ["tickets"] = tickets
-                        .Select(ticket => Output.Project(TicketView.From(ticket, now, threshold), fields))
-                        .ToList()
-                });
+                Output.WriteJson(wip, Fields(command));
                 return 0;
             }
 
-            var zone = await ZoneAsync(command, store);
+            var zone = await ZoneAsync(command, api);
+            var threshold = wip.AgingThresholdDays > 0 ? wip.AgingThresholdDays : (double?)null;
 
-            Output.WriteLine($"{tickets.Count} of {settings.WipLimit} in flight" +
+            Output.WriteLine($"{wip.InFlight} of {wip.WipLimit} in flight" +
                 (threshold.HasValue ? $"; aging past {Output.Number(threshold)}d (p85 cycle time)" : string.Empty));
             Output.WriteLine();
 
             Output.WriteTable(
                 ["id", "state", "started", "age", "owner", "title", "blocked because"],
-                tickets.Select(ticket =>
-                {
-                    var age = ticket.AgeDays(now);
-                    var aging = threshold.HasValue && age.HasValue && age.Value > threshold.Value;
-
-                    return (IReadOnlyList<string>)
-                    [
-                        ticket.Id,
-                        ticket.State.HasValue ? Vocabulary.ToWire(ticket.State.Value) : "-",
-                        When(ticket.StartedAt, zone),
-                        (aging ? "! " : string.Empty) + Output.Number(age) + "d",
-                        Output.Text(ticket.Owner),
-                        ticket.Title,
-                        Output.Text(ticket.BlockedReason)
-                    ];
-                }).ToList());
+                wip.Tickets.Select(ticket => (IReadOnlyList<string>)
+                [
+                    ticket.Id,
+                    Output.Text(ticket.State),
+                    When(ticket.StartedAt, zone),
+                    (ticket.Aging == true ? "! " : string.Empty) + Output.Number(ticket.AgeDays) + "d",
+                    Output.Text(ticket.Owner),
+                    ticket.Title,
+                    Output.Text(ticket.BlockedReason)
+                ]).ToList());
 
             return 0;
         }
 
-        /// <summary>
-        /// The only verb that reads a ticket's prose without being told which ticket. It spans all
-        /// three tabs deliberately — "have we discussed this before?" is most often answered by
-        /// something already archived, and every other query verb is scoped to one column.
-        /// </summary>
         public async Task<int> FindAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var text = command.RequirePositional(0, "some text to search for");
 
-            var matches = await store.SearchAsync(text, BuildFilter(command));
+            var matches = await api.FindAsync(text, BuildFilter(command));
 
             if (command.Json)
             {
-                var fields = Output.ParseFields(command.Option("fields"));
-                Output.WriteJson(matches.Select(match => Output.Project(TicketView.From(match, Now), fields)).ToList());
+                Output.WriteJson(matches, Fields(command));
                 return 0;
             }
 
-            if (matches.Count == 0)
+            if (matches.Tickets.Count == 0)
             {
                 Output.WriteLine($"Nothing matched '{text}'.");
 
@@ -430,15 +421,15 @@ namespace Noogen.Backlog.Cli
 
             Output.WriteTable(
                 ["id", "match", "phase", "wsjf", "area", "owner", "title"],
-                matches.Select(match => (IReadOnlyList<string>)
+                matches.Tickets.Select(ticket => (IReadOnlyList<string>)
                 [
-                    match.Ticket.Id,
-                    string.Join("+", match.Where),
-                    Vocabulary.ToWire(match.Ticket.Phase),
-                    Output.Number(match.Ticket.Score.Value),
-                    Output.Text(match.Ticket.Area),
-                    Output.Text(match.Ticket.Owner),
-                    match.Ticket.Title
+                    ticket.Id,
+                    string.Join("+", ticket.Match ?? []),
+                    ticket.Phase,
+                    Output.Number(ticket.Wsjf),
+                    Output.Text(ticket.Area),
+                    Output.Text(ticket.Owner),
+                    ticket.Title
                 ]).ToList());
 
             return 0;
@@ -446,18 +437,19 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> FlowAsync(CommandLine command)
         {
-            var store = await StoreAsync();
-            var since = command.SinceOption("since", Now);
-            var flow = await store.FlowAsync(since);
+            var api = await ApiAsync();
+            var since = command.SinceOption("since", DateTimeOffset.UtcNow);
+            var view = await api.FlowAsync(since);
+            var flow = view.Metrics;
 
             if (command.Json)
             {
-                Output.WriteJson(flow);
+                Output.WriteJson(view);
                 return 0;
             }
 
-            var zone = await ZoneAsync(command, store);
-            Output.WriteLine(since.HasValue ? $"Flow since {When(since.Value, zone)}" : "Flow (all time)");
+            var zone = await ZoneAsync(command, api);
+            Output.WriteLine(since.HasValue ? $"Flow since {When(Iso.ToText(since.Value), zone)}" : "Flow (all time)");
             Output.WriteLine($"  throughput      {flow.Throughput} done");
             Output.WriteLine($"  cycle time p50  {Output.Number(flow.CycleTimeP50)}d");
             Output.WriteLine($"  cycle time p85  {Output.Number(flow.CycleTimeP85)}d");
@@ -468,76 +460,38 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ShowAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            var ticket = await store.GetAsync(id) ?? throw new KeyNotFoundException($"No ticket '{id}'.");
-            var body = Narrow(command, await store.GetBodyAsync(id));
+            var detail = await api.ShowAsync(id, command.Option("section"), command.Has("full"));
+            var ticket = detail.Ticket;
 
             if (command.Json)
             {
-                Output.WriteJson(new Dictionary<string, object?>
-                {
-                    ["ticket"] = TicketView.From(ticket, Now),
-                    ["body"] = body
-                });
+                Output.WriteJson(detail);
                 return 0;
             }
 
-            Output.WriteLine($"{ticket.Id}  [{Vocabulary.ToWire(ticket.Phase)}]  {ticket.Title}");
-            Output.WriteLine($"  type {Vocabulary.ToWire(ticket.Type)}   area {Output.Text(ticket.Area)}   owner {Output.Text(ticket.Owner)}");
-            Output.WriteLine($"  wsjf {Output.Number(ticket.Score.Value)} (business value {Output.Number(ticket.Score.BusinessValue)}, time criticality {Output.Number(ticket.Score.TimeCriticality)}, risk & opportunity {Output.Number(ticket.Score.RiskReductionOpportunityEnablement)}, job size {Output.Number(ticket.Score.JobSize)})");
+            Output.WriteLine($"{ticket.Id}  [{ticket.Phase}]  {ticket.Title}");
+            Output.WriteLine($"  type {ticket.Type}   area {Output.Text(ticket.Area)}   owner {Output.Text(ticket.Owner)}");
+            Output.WriteLine($"  wsjf {Output.Number(ticket.Wsjf)} (business value {Output.Number(ticket.Bv)}, time criticality {Output.Number(ticket.Tc)}, risk & opportunity {Output.Number(ticket.Rroe)}, job size {Output.Number(ticket.Size)})");
 
-            if (ticket.State.HasValue)
-                Output.WriteLine($"  state {Vocabulary.ToWire(ticket.State.Value)}{(ticket.BlockedReason is null ? string.Empty : $" — {ticket.BlockedReason}")}");
+            if (ticket.State is not null)
+                Output.WriteLine($"  state {ticket.State}{(ticket.BlockedReason is null ? string.Empty : $" — {ticket.BlockedReason}")}");
 
-            if (ticket.Outcome.HasValue)
-                Output.WriteLine($"  outcome {Vocabulary.ToWire(ticket.Outcome.Value)}   lead {Output.Number(ticket.LeadDays)}d   cycle {Output.Number(ticket.CycleDays)}d");
+            if (ticket.Outcome is not null)
+                Output.WriteLine($"  outcome {ticket.Outcome}   lead {Output.Number(ticket.LeadDays)}d   cycle {Output.Number(ticket.CycleDays)}d");
 
-            var zone = await ZoneAsync(command, store);
+            var zone = await ZoneAsync(command, api);
             Output.WriteLine($"  created {When(ticket.Created, zone)}   updated {When(ticket.Updated, zone)}");
 
-            if (ticket.StartedAt.HasValue || ticket.ArchivedAt.HasValue)
+            if (ticket.StartedAt is not null || ticket.ArchivedAt is not null)
                 Output.WriteLine($"  started {When(ticket.StartedAt, zone)}   archived {When(ticket.ArchivedAt, zone)}");
 
             Output.WriteLine($"  {Output.Text(ticket.DocUrl)}");
             Output.WriteLine();
-            Output.WriteLine(body);
+            Output.WriteLine(detail.Body);
             return 0;
-        }
-
-        /// <summary>How many Activity Log entries <c>show</c> keeps unless asked for all of them.</summary>
-        const int ActivityLogEntriesShown = 3;
-
-        /// <summary>
-        /// What of the body <c>show</c> prints. Display only — this never touches what is stored,
-        /// and nothing here may be handed to a write. See <see cref="TicketDocument.TrimActivityLog"/>.
-        ///
-        /// The default trims the Activity Log because it is the part that grows without bound:
-        /// every lifecycle event appends a line, so on a ticket that has been worked it is most of
-        /// the document, and it is rarely what the reader came for. The recent entries are, so
-        /// those are the ones kept.
-        ///
-        /// <c>--section</c> narrows to one heading instead, which is what a read-before-write
-        /// wants: a prose option replaces a whole section, so the caller needs that section and
-        /// nothing else. Asking for the log by name gives it whole — trimming what was explicitly
-        /// requested would be answering a different question.
-        /// </summary>
-        static string Narrow(CommandLine command, string body)
-        {
-            var section = command.Option("section");
-
-            if (!string.IsNullOrWhiteSpace(section))
-            {
-                var heading = section.Replace('-', ' ').Trim();
-
-                return TicketDocument.SectionOf(body, heading)
-                    ?? throw new UsageException(
-                        $"This ticket has no '{heading}' section. It has: "
-                        + $"{string.Join(", ", TicketDocument.HeadingsOf(body))}.");
-            }
-
-            return command.Has("full") ? body : TicketDocument.TrimActivityLog(body, ActivityLogEntriesShown);
         }
 
         // --- capture and edit ---
@@ -546,7 +500,7 @@ namespace Noogen.Backlog.Cli
         {
             TextInput.RejectSharedStandardInput(command);
 
-            var store = await StoreAsync();
+            var api = await ApiAsync();
 
             var request = new NewTicket
             {
@@ -559,47 +513,38 @@ namespace Noogen.Backlog.Cli
                 Score = ReadScore(command)
             };
 
-            var ticket = await store.CreateAsync(request);
+            var filed = await api.CreateAsync(request);
 
-            Remind(command, ticket, request.Description is null, request.AcceptanceCriteria is null);
+            Remind(filed);
 
-            return Report(command, ticket, $"Created {ticket.Id}.");
+            return Report(command, filed, $"Created {filed.Ticket.Id}.");
         }
 
         /// <summary>
-        /// Names the sections that went in as `*TODO*`.
+        /// Names the sections that went in as `*TODO*`, and how to fill them.
         ///
-        /// A placeholder is the honest thing to write when nobody said what "done" means, and
-        /// filing fast is worth keeping — but nothing used to say the placeholder was there, so an
-        /// unwritten acceptance criterion looked exactly like a finished ticket. Stderr, and
-        /// before the report: stdout under `--json` is one document, and this is a reminder rather
-        /// than part of the result.
+        /// Stderr, and before the report: stdout under `--json` is one document, and this is a
+        /// reminder rather than part of the result.
         /// </summary>
-        static void Remind(CommandLine command, Ticket ticket, bool noDescription, bool noCriteria)
+        static void Remind(NewTicketView filed)
         {
-            if (!noDescription && !noCriteria)
+            if (filed.Reminder is null)
                 return;
 
-            var missing = new List<string>();
-
-            if (noDescription)
-                missing.Add("description");
-
-            if (noCriteria)
-                missing.Add("acceptance criteria");
+            var id = filed.Ticket.Id;
 
             Output.WriteError(
-                $"{ticket.Id} has no {string.Join(" and no ", missing)} — the section(s) say *TODO*. Fill in with:\n"
-                + $"  backlog edit {ticket.Id}"
-                + (noDescription ? " --description-file <path>" : string.Empty)
-                + (noCriteria ? " --acceptance-criteria-file <path>" : string.Empty));
+                $"{id} has no {string.Join(" and no ", filed.MissingSections)} — the section(s) say *TODO*. Fill in with:\n"
+                + $"  backlog edit {id}"
+                + (filed.MissingSections.Contains("description") ? " --description-file <path>" : string.Empty)
+                + (filed.MissingSections.Contains("acceptance criteria") ? " --acceptance-criteria-file <path>" : string.Empty));
         }
 
         public async Task<int> EditAsync(CommandLine command)
         {
             TextInput.RejectSharedStandardInput(command);
 
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
             var edit = new TicketEdit
@@ -613,32 +558,25 @@ namespace Noogen.Backlog.Cli
                 Note = TextInput.ReadProse(command, "note")
             };
 
-            var ticket = await store.UpdateAsync(id, edit);
+            var ticket = await api.UpdateAsync(id, edit);
             return Report(command, ticket, $"Updated {ticket.Id}.");
         }
 
         public async Task<int> ScoreAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
-            var score = ReadScore(command);
 
-            if (!score.BusinessValue.HasValue && !score.TimeCriticality.HasValue
-                && !score.RiskReductionOpportunityEnablement.HasValue && !score.JobSize.HasValue)
-            {
-                throw new UsageException("Pass at least one of --bv, --tc, --rroe, --size.");
-            }
-
-            var ticket = await store.ScoreAsync(id, score);
-            return Report(command, ticket, $"{ticket.Id} scored — wsjf {Output.Number(ticket.Score.Value)}.");
+            var ticket = await api.ScoreAsync(id, ReadScore(command));
+            return Report(command, ticket, $"{ticket.Id} scored — wsjf {Output.Number(ticket.Wsjf)}.");
         }
 
         public async Task<int> NoteAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            var ticket = await store.AppendNoteAsync(id, TextInput.RequireProse(command, "text"));
+            var ticket = await api.NoteAsync(id, TextInput.RequireProse(command, "text"));
             return Report(command, ticket, $"Noted on {ticket.Id}.");
         }
 
@@ -646,49 +584,49 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> StartAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
             var owner = command.Has("owner") ? _config.ResolveOwner(command.Option("owner")) : _config.ResolveOwner("me");
 
-            var ticket = await store.StartAsync(id, owner, command.HasFlag("force"));
+            var ticket = await api.StartAsync(id, owner, command.HasFlag("force"));
             return Report(command, ticket, $"Started {ticket.Id} ({ticket.Owner}). It is no longer WSJF-ranked.");
         }
 
         public async Task<int> BlockAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            var ticket = await store.SetStateAsync(id, WorkState.Blocked, TextInput.RequireProse(command, "reason"));
+            var ticket = await api.SetStateAsync(id, WorkState.Blocked, TextInput.RequireProse(command, "reason"));
             return Report(command, ticket, $"Blocked {ticket.Id}.");
         }
 
         public async Task<int> SetStateAsync(CommandLine command, WorkState state)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            var ticket = await store.SetStateAsync(id, state, null);
+            var ticket = await api.SetStateAsync(id, state, null);
             return Report(command, ticket, $"{ticket.Id} is now {Vocabulary.ToWire(state)}.");
         }
 
         public async Task<int> ArchiveAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
             var outcome = Vocabulary.Parse<Outcome>(command.Option("as") ?? "done", "outcome");
 
-            var ticket = await store.ArchiveAsync(id, outcome, TextInput.ReadProse(command, "note"));
+            var ticket = await api.ArchiveAsync(id, outcome, TextInput.ReadProse(command, "note"));
             return Report(command, ticket,
                 $"Archived {ticket.Id} as {Vocabulary.ToWire(outcome)} — lead {Output.Number(ticket.LeadDays)}d, cycle {Output.Number(ticket.CycleDays)}d. The document was moved, not deleted.");
         }
 
         public async Task<int> RestoreAsync(CommandLine command)
         {
-            var store = await StoreAsync();
+            var api = await ApiAsync();
             var id = command.RequirePositional(0, "a ticket id");
 
-            var ticket = await store.RestoreAsync(id);
+            var ticket = await api.RestoreAsync(id);
             return Report(command, ticket, $"Restored {ticket.Id} to the backlog. Rescore it before it can rank.");
         }
 
@@ -696,36 +634,31 @@ namespace Noogen.Backlog.Cli
 
         public async Task<int> ReindexAsync(CommandLine command)
         {
-            var store = await StoreAsync();
-            var repaired = await store.ReindexAsync();
+            var api = await ApiAsync();
+            var reindexed = await api.ReindexAsync();
 
             if (command.Json)
             {
-                Output.WriteJson(new Dictionary<string, int> { ["repaired"] = repaired });
+                Output.WriteJson(reindexed);
                 return 0;
             }
 
-            Output.WriteLine($"Rewrote {repaired} row(s) from their documents.");
+            Output.WriteLine($"Rewrote {reindexed.Repaired} row(s) from their documents.");
             return 0;
         }
 
         public async Task<int> DoctorAsync(CommandLine command)
         {
-            var store = await StoreAsync();
-            var report = await store.DoctorAsync();
+            var api = await ApiAsync();
+            var report = await api.DoctorAsync();
 
             if (command.Json)
             {
-                Output.WriteJson(new Dictionary<string, object>
-                {
-                    ["healthy"] = report.IsHealthy,
-                    ["ticketCount"] = report.TicketCount,
-                    ["issues"] = report.Issues
-                });
-                return report.IsHealthy ? 0 : 1;
+                Output.WriteJson(report);
+                return report.Healthy ? 0 : 1;
             }
 
-            if (report.IsHealthy)
+            if (report.Healthy)
             {
                 Output.WriteLine($"{report.TicketCount} ticket(s), no issues.");
                 return 0;
@@ -757,10 +690,10 @@ namespace Noogen.Backlog.Cli
             JobSize = command.IntOption("size", "job-size")
         };
 
-        static int Report(CommandLine command, Ticket ticket, string message)
+        static int Report(CommandLine command, IBacklogView view, string message)
         {
             if (command.Json)
-                Output.WriteJson(TicketView.From(ticket, Now));
+                Output.WriteJson(view);
             else
                 Output.WriteLine(message);
 
