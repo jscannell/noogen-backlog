@@ -756,6 +756,16 @@ SHOULD protects is a client that would otherwise get nothing usable, and `Create
 that better than a second copy of the record. `structuredContent` is the contract; `content[0]` says
 what happened.
 
+Two things follow in the words themselves. `show`'s sentence ends by saying the ticket's text is in
+the result under `body` — the document is the reason the verb was called, and a caller weighing the
+sentence alone otherwise answers that it cannot reach it. And nothing a caller is given up front —
+the tool description, the server's `instructions`, the generated help — names Drive or the Sheet. A
+caller told the tickets are Google Docs in a shared drive reasons that it has no Drive tool and
+therefore cannot read one, so it stops at the headline `show` returns and never reads the document
+`show` already handed it. Where a ticket is kept is the server's business. The guides still say
+where prose is indexed, because `find`'s two halves are trusted differently and a caller asks for a
+guide deliberately.
+
 A refusal is `isError` on the result, never a JSON-RPC error — the call was well formed and the
 backlog said no, which is an answer. Its shape is the CLI's failure shape, `{"kind": ..., "error":
 ...}`, under the same one-word kind the CLI turns into an exit code.

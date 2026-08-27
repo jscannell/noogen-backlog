@@ -300,12 +300,12 @@ namespace Noogen.Backlog.Verbs
         public static IReadOnlyList<VerbGroup> Groups { get; } =
         [
             new VerbGroup(Queue,
-                "'show' trims the Activity Log to the last few entries; 'full' prints all of them, and "
-                + "'section description' (or acceptance-criteria, notes, activity-log) prints just that one "
-                + "— which is what you want before rewriting it.\n\n"
-                + "'find' is the check to run before filing something. It reads two sources and says which "
-                + "one hit: names — id, title, area, owner — come from the index and match on any fragment, "
-                + "while document prose comes from Drive's full-text index, which matches whole words only, "
+                "'show' trims the Activity Log to the last few entries; 'full' gives all of them, and "
+                + "'section description' (or acceptance-criteria, notes, activity-log) gives just that "
+                + "one — which is what you want before rewriting it.\n\n"
+                + "'find' reads two sources and says which one hit: names — id, title, area, owner — "
+                + "come from the index and match on any fragment, "
+                + "while document prose comes from a full-text index, which matches whole words only, "
                 + "covers the whole document including the Activity Log, and may not yet know about a "
                 + "document written minutes ago."),
 
@@ -341,17 +341,17 @@ namespace Noogen.Backlog.Verbs
             new VerbDefinition("next", "The highest-ranked item, and the answer to \"what should I work on?\".")
                 { Group = Queue, Options = [.. Filter] },
 
-            new VerbDefinition("find", "Search every tab, matching names in the index and prose in Drive.")
+            new VerbDefinition("find", "Search every tab, matching names in the index and prose in the documents.")
                 { Group = Queue, Positional = "some text to search for", PositionalName = "text", Options = [Area, Owner, Top, Fields] },
 
-            new VerbDefinition("show", "One ticket and its document.")
+            new VerbDefinition("show", "One ticket and the full text of its document.")
             {
                 Group = Queue,
                 Positional = TicketId,
                 Options =
                 [
-                    new VerbOption("section", "Print only this heading — description, acceptance-criteria, notes, activity-log, or any the document has."),
-                    new VerbOption("full", "Print the whole Activity Log rather than the last few entries.") { TakesValue = false }
+                    new VerbOption("section", "Return only this heading — description, acceptance-criteria, notes, activity-log, or any the document has."),
+                    new VerbOption("full", "Return the whole Activity Log rather than the last few entries.") { TakesValue = false }
                 ]
             },
 

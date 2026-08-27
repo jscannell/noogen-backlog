@@ -1,12 +1,14 @@
 ---
 name: backlog
-description: The Noogen backlog - a WSJF-prioritized Kanban board of tickets in Google Drive. File, score, start, block or finish a work item; answer what's next, what is in flight, WIP, priorities, cycle time.
+description: The Noogen backlog - a WSJF-prioritized Kanban board of work tickets. File, score, start, block or finish a work item; answer what's next, what is in flight, WIP, priorities, cycle time.
 ---
 
 # Noogen backlog
 
-One Google Doc per ticket in a shared drive, indexed by a Google Sheet. Reach everything through
-the `backlog` CLI — never edit the Sheet directly, and never hand-write a ticket document.
+Every ticket is a document of prose, indexed by a spreadsheet, and `backlog` holds both: `show`
+returns a ticket's whole text and `find` searches it, so reading one needs nothing else. Reach
+everything through the tool — never edit the index directly, and never hand-write a ticket
+document.
 
 ## The model
 
@@ -25,7 +27,7 @@ backlog list [--area A] [--owner O] [--top N]   # the queue, rank order
 backlog next [--owner me]                       # highest-ranked item
 backlog wip [--owner O]                         # in flight, oldest first, flags aging
 backlog find "<text>" [--area A] [--top N]      # search every tab, names and prose
-backlog show <id> [--section S] [--full]        # one ticket and its body
+backlog show <id> [--section S] [--full]        # one ticket and the text of its document
 backlog flow [--since 90d]                      # throughput, cycle-time p50/p85
 
 backlog new --title "..." [--type feature|bug|chore|spike] [--area A] [--owner O]
@@ -95,7 +97,7 @@ Every hit says which of two sources matched:
 
 - **`name`** — id, title, area or owner, from the index. Exact and immediate, so a ticket filed a
   minute ago is found by its title.
-- **`body`** — the document text, from Drive's full-text index. The only route to a description or
+- **`body`** — the document text, from a full-text index of it. The only route to a description or
   acceptance criteria, with three limits: it matches whole words (`limit` misses *limiting*), it
   may not yet know about a document written minutes ago, and it searches the whole document
   including the Activity Log.

@@ -15,17 +15,17 @@ namespace Noogen.Backlog.Mcp
     public static class ServerGuidance
     {
         public const string Instructions =
-            "The Noogen backlog: one Google Doc per ticket in a Drive shared drive, indexed by a "
-            + "Sheet, prioritized with WSJF, run as Kanban. Everything goes through the one "
-            + "'backlog' tool.\n"
+            "The Noogen backlog: a WSJF-prioritized Kanban board of work tickets, each one a "
+            + "document of prose. The 'backlog' tool holds them and is the whole of the access "
+            + "you need — reading or writing a ticket involves no other tool and no file access.\n"
             + "\n"
             + "Work moves Backlog -> In Progress -> Archive, and the tab a ticket lives on is its "
             + "state. There is no status field to set: 'start', 'block', 'unblock', 'review', "
             + "'archive' and 'restore' are how a ticket moves, and only unstarted work is ranked.\n"
             + "\n"
             + "Read cheaply. 'next' answers \"what should I work on?\", 'wip' what is in flight, "
-            + "'show' one ticket and its document — with 'section' for one heading of it. The "
-            + "list-shaped verbs take 'top' and 'fields' to return less.\n"
+            + "'show' one ticket and the whole text of its document — with 'section' for one "
+            + "heading of it. The list-shaped verbs take 'top' and 'fields' to return less.\n"
             + "\n"
             + "Before filing anything, run 'find'. It searches every tab including the archive, and "
             + "the ticket usually already exists.\n"

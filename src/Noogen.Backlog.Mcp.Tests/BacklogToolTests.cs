@@ -531,6 +531,30 @@ namespace Noogen.Backlog.Mcp.Tests
             }
         }
 
+        /// <summary>
+        /// The help is the whole of what a caller here learns about calling, so it may not borrow
+        /// the surface next door: an option dash, a '-file' spelling or stdin is a spelling this
+        /// server refuses, offered to somebody who has no shell to type it in.
+        /// </summary>
+        [Theory]
+        [InlineData("--")]
+        [InlineData("-file")]
+        [InlineData("stdin")]
+        [InlineData("standard input")]
+        [InlineData("command line")]
+        public async Task Invoke_Help_NamesNothingFromTheCommandLine(string spelling)
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            var tool = TestServer.ToolFor(backlog);
+
+            var help = (await tool.CallAsync("help")).Text();
+
+            foreach (var verb in VerbCatalog.On(VerbSurface.Mcp))
+                help += (await tool.CallAsync("help", TestServer.With("verb", verb.Name))).Text();
+
+            Assert.DoesNotContain(spelling, help, StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
         public async Task Invoke_HelpWithAWithheldVerb_AnswersWithTheReasonRatherThanUsage()
         {
@@ -629,6 +653,47 @@ namespace Noogen.Backlog.Mcp.Tests
                 word,
                 BacklogTool.Describe(TestServer.ToolFor(backlog)).ProtocolTool.Description ?? string.Empty,
                 StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Where a ticket is kept is the server's business. A caller told the tickets are Google
+        /// Docs in a Drive shared drive reasons that it has no Drive tool and therefore cannot
+        /// read one, so it stops at the headline `show` returns and never reads the document
+        /// `show` already handed it. This covers the text a caller is given whether it asks or
+        /// not, and the help it asks for; the guides may still say where prose is indexed.
+        /// </summary>
+        [Theory]
+        [InlineData("Drive")]
+        [InlineData("Google")]
+        [InlineData("Sheet")]
+        public async Task Describe_TheSurfaceACallerReads_DoesNotNameTheStorageBehindATicket(string word)
+        {
+            var backlog = await TestBacklog.CreateAsync();
+
+            var surface = string.Join(
+                "\n",
+                BacklogTool.Describe(TestServer.ToolFor(backlog)).ProtocolTool.Description,
+                ServerGuidance.Instructions,
+                VerbHelp.Write(VerbSurface.Mcp));
+
+            Assert.DoesNotContain(word, surface, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// The document is the reason `show` was called, and it arrives in the structured half. A
+        /// caller weighing the sentence alone has to be told the text is there, or it answers that
+        /// it cannot reach the ticket's content.
+        /// </summary>
+        [Fact]
+        public async Task Invoke_Show_SaysWhereTheDocumentTextIs()
+        {
+            var backlog = await TestBacklog.CreateAsync();
+            var ticket = await backlog.AddAsync("A ticket");
+
+            var result = await TestServer.ToolFor(backlog).CallAsync("show", TestServer.With("id", ticket.Id));
+
+            Assert.Contains("body", result.Text(), StringComparison.Ordinal);
+            Assert.False(string.IsNullOrEmpty(result.Structured().GetProperty("body").GetString()));
         }
 
         /// <summary>

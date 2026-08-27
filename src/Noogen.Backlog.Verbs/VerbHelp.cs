@@ -17,7 +17,7 @@ namespace Noogen.Backlog.Verbs
     public static class VerbHelp
     {
         const string Preamble =
-            "backlog — a WSJF-prioritized Kanban backlog stored in Google Drive.\n" +
+            "backlog — a WSJF-prioritized Kanban backlog of work tickets, each one a document.\n" +
             "\n" +
             "Work moves Backlog -> In Progress -> Archive. The tab a ticket lives on is its state,\n" +
             "so the verbs below are the transitions; there is no free-form status flag. Only\n" +
@@ -39,12 +39,11 @@ namespace Noogen.Backlog.Verbs
             + "verb runs without: 'show {id, section?, full?}' is called as\n"
             + "{\"verb\": \"show\", \"options\": {\"id\": \"NG-0007\"}}.\n"
             + "\n"
-            + "Results are always structured and always UTC — there is no json or utc option here.\n"
-            + "Prose arrives as an ordinary string, newlines and quotes included, so none of the\n"
-            + "command line's file and stdin spellings are needed.\n"
+            + "Results are always structured and always UTC. The text on a result is a sentence\n"
+            + "about what happened; the answer itself — a ticket's document text included — is\n"
+            + "the structured half. Prose is an ordinary string, newlines and quotes included.\n"
             + "\n"
-            + "Ask for one verb by name to see what it takes. WSJF scores are modified Fibonacci:\n"
-            + "1, 2, 3, 5, 8, 13, 20.";
+            + "WSJF scores are modified Fibonacci: 1, 2, 3, 5, 8, 13, 20.";
 
         static string Prefix(VerbSurface surface) => surface == VerbSurface.Cli ? "backlog " : string.Empty;
 

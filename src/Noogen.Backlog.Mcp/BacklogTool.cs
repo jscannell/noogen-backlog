@@ -51,15 +51,24 @@ namespace Noogen.Backlog.Mcp
         /// `description`, which was tuned for this exact job and is what a caller *with* a skill
         /// matches on; a caller without one should not be worse off.
         ///
+        /// The second paragraph says the ticket text is here, and nothing on this surface names
+        /// the storage behind it. A caller told the tickets are Google Docs in a shared drive
+        /// reasons that it has no Drive tool and therefore cannot read one — so it stops at the
+        /// headline `show` returns and never looks at the document `show` already gave it.
+        ///
         /// Everything else a caller needs before touching the backlog — the three columns, that the
         /// tab is the state, that `find` comes before `new` — is in the server's own instructions,
         /// which are loaded in every conversation whether the backlog is touched or not. Saying it
         /// twice would cost twice and drift once.
         /// </summary>
         const string ToolDescription =
-            "The Noogen backlog: a WSJF-prioritized Kanban board of tickets in Google Drive. "
+            "The Noogen backlog: a WSJF-prioritized Kanban board of work tickets. "
             + "Create a ticket, score it, start, block or finish it; answer what to work on next, "
             + "what is in flight, and whether a ticket for something already exists.\n"
+            + "\n"
+            + "This tool holds the tickets themselves. 'show' returns a ticket's whole text — its "
+            + "description, acceptance criteria, notes and activity log — and 'find' searches that "
+            + "text. Reading or writing a ticket needs no other tool and no file access.\n"
             + "\n"
             + "'options' carries everything the verb reads, keyed by name: 'show {id, section?}' "
             + "is called as {\"verb\": \"show\", \"options\": {\"id\": \"NG-0007\"}}. Those key "
@@ -195,7 +204,8 @@ namespace Noogen.Backlog.Mcp
                     var detail = await _api.ShowAsync(
                         given.RequireSubject(), given.Text("section"), given.Flag("full"), cancellationToken);
 
-                    return ToolResults.Answer(detail, null, Headline(detail.Ticket));
+                    return ToolResults.Answer(detail, null,
+                        Headline(detail.Ticket) + " Its text is in this result, under 'body'.");
                 }
 
                 case "new":
@@ -399,7 +409,7 @@ namespace Noogen.Backlog.Mcp
             ? $"Nothing matched '{text}'. Names match on any fragment, but document text matches "
               + "whole words only, and a document written in the last few minutes may not be indexed yet."
             : $"{matches.Tickets.Count} match(es). Each carries 'match': 'name' is the index, which is "
-              + "current and matches fragments; 'body' is Drive's full-text index, which lags and matches whole words.";
+              + "current and matches fragments; 'body' is the document text index, which lags and matches whole words.";
 
         static string Flowed(FlowView view)
         {
