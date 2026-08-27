@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Which backlog, and as whom, comes from .vscode/mcp.env — a person's own state, gitignored,
+      // seeded from mcp.env.example. Nothing machine-specific belongs in this file.
+      "name": "MCP server",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build mcp",
+      "program": "${workspaceFolder}/src/Noogen.Backlog.Mcp/bin/Debug/net10.0/Noogen.Backlog.Mcp.dll",
+      "cwd": "${workspaceFolder}/src/Noogen.Backlog.Mcp",
+      "console": "integratedTerminal",
+      "stopAtEntry": false,
+      "envFile": "${workspaceFolder}/.vscode/mcp.env",
+      "env": {
+        // Only ever read to refresh a token from NOOGEN_BACKLOG_TOKENS. This assembly embeds no
+        // OAuth client — the CLI nupkg is what carries one — so without this the signed-in-user
+        // path resolves to nothing and the server falls through to ADC and reports "not signed in".
+        // A missing file is harmless: resolution just moves on.
+        "NOOGEN_BACKLOG_OAUTH_FILE": "${workspaceFolder}/oauth.json",
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  ]
+}
