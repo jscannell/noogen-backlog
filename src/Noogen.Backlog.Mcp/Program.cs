@@ -49,7 +49,18 @@ namespace Noogen.Backlog.Mcp
 
                 // By type rather than by scanning the assembly: there is one resource class, and
                 // naming it says which one rather than trusting whatever a future file declares.
-                .WithResources([typeof(BacklogGuide)]);
+                .WithResources([typeof(BacklogGuide)])
+
+                // From 2026-07-28 a cacheable result has to say how long it keeps, and the SDK's
+                // default says "immediately stale" — which understates a tool list and a set of
+                // guides that are the same for every caller and cannot change while this process
+                // runs. See CacheHints for what the ten minutes is measuring.
+                .WithRequestFilters(filters => filters
+                    .AddListToolsFilter(CacheHints.On<ListToolsRequestParams, ListToolsResult>())
+                    .AddListResourcesFilter(CacheHints.On<ListResourcesRequestParams, ListResourcesResult>())
+                    .AddListResourceTemplatesFilter(
+                        CacheHints.On<ListResourceTemplatesRequestParams, ListResourceTemplatesResult>())
+                    .AddReadResourceFilter(CacheHints.On<ReadResourceRequestParams, ReadResourceResult>()));
 
             var app = builder.Build();
 
